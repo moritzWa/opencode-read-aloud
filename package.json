@@ -1,0 +1,59 @@
+{
+  "name": "opencode-read-aloud",
+  "version": "0.1.0",
+  "description": "OpenCode TUI plugin: read the last answer aloud with ElevenLabs, highlighting each word as it is spoken.",
+  "license": "MIT",
+  "type": "module",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "opencode-tui",
+    "tui",
+    "tts",
+    "text-to-speech",
+    "read-aloud",
+    "elevenlabs"
+  ],
+  "oc-plugin": [
+    "tui"
+  ],
+  "exports": {
+    "./tui": "./index.tsx"
+  },
+  "files": [
+    "index.tsx",
+    "answer.ts",
+    "player.ts",
+    "script.ts",
+    "view.ts",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "bun test"
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "1.18.34",
+    "@opencode-ai/sdk": "1.18.34",
+    "@opentui/core": "0.4.5",
+    "@opentui/keymap": "0.4.5",
+    "@opentui/solid": "0.4.5",
+    "@types/bun": "latest",
+    "solid-js": "1.9.10"
+  },
+  "author": {
+    "name": "Moritz Wallawitsch",
+    "url": "https://github.com/moritzWa"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/moritzWa/opencode-read-aloud.git"
+  },
+  "homepage": "https://github.com/moritzWa/opencode-read-aloud#readme",
+  "bugs": {
+    "url": "https://github.com/moritzWa/opencode-read-aloud/issues"
+  },
+  "engines": {
+    "opencode": ">=1.18.27"
+  }
+}

@@ -185,15 +185,25 @@ async function elevenlabs(text: string, key: string, voice: string, model: strin
 
 /**
  * Speechify streams server-sent events whose speech marks time whole words, in ms, by
- * character offset into the text. Every character up to a word's end takes that word's
+ * code point offset into the text. Every character up to a word's end takes that word's
  * start, so a script word that begins inside it, or in the gap before it, gets its time.
  */
 async function speechify(text: string, key: string, voice: string, model: string, target: Target) {
+  // UTF-16 index of every code point, since the script indexes the string itself.
+  const units = [0]
+  for (const char of text) units.push(units[units.length - 1] + char.length)
   const response = await fetch("https://api.speechify.ai/v1/audio/stream/with-timestamps", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    // Streaming only offers 24 kHz mp3 at most.
-    body: JSON.stringify({ input: text, voice_id: voice, model, output_format: "mp3_24000_128" }),
+    body: JSON.stringify({
+      // An emoji anywhere makes Speechify drop the last word, audio and all; a space in its
+      // place keeps every offset.
+      input: text.replace(/\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F|\u200D/gu, " "),
+      voice_id: voice,
+      model,
+      // Streaming only offers 24 kHz mp3 at most.
+      output_format: "mp3_24000_128",
+    }),
   })
   if (!response.ok || !response.body) throw new Error(`Speechify ${response.status}: ${await response.text()}`)
   await lines(response.body, (line) => {
@@ -207,7 +217,7 @@ async function speechify(text: string, key: string, voice: string, model: string
     if (event.type === "speech.error") throw new Error(`Speechify ${event.error?.code}: ${event.error?.message}`)
     if (event.audio) target.chunks.push(Buffer.from(event.audio, "base64"))
     for (const mark of event.speech_marks ?? [])
-      while (target.starts.length < mark.end) target.starts.push(mark.start_time / 1000)
+      while (target.starts.length < (units[mark.end] ?? text.length)) target.starts.push(mark.start_time / 1000)
     target.wake()
   })
 }

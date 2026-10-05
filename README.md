@@ -20,18 +20,30 @@
 
 ## Requirements
 
-- An [ElevenLabs](https://elevenlabs.io) API key. ElevenLabs returns a start time for every character, which is what drives the word highlighting.
+- A [Speechify](https://speechify.ai) or [ElevenLabs](https://elevenlabs.io) API key. Both report when each word is spoken, which is what drives the highlighting. When both keys are set, Speechify is used.
 - `ffmpeg` on your `PATH` (`brew install ffmpeg`). It handles seeking and speed changes.
 
-Set the key with either of these:
+| Provider   | Price per 1M characters                  | Free allowance        | Per typical answer (~1,600 characters) |
+| ---------- | ---------------------------------------- | --------------------- | -------------------------------------- |
+| Speechify  | $10 (Starter), down to $6                | 500k characters/month | about 1.6¢                             |
+| ElevenLabs | $50 pay-as-you-go (Flash)                | 10k characters/month  | about 8¢                               |
+
+Set a key with an environment variable or a key file:
 
 ```sh
+export SPEECHIFY_API_KEY=sk_...
+# or
+echo sk_... > ~/.local/share/opencode/speechify.key
+
 export ELEVENLABS_API_KEY=sk_...
 # or
 echo sk_... > ~/.local/share/opencode/elevenlabs.key
 ```
 
-Optional: `ELEVENLABS_VOICE_ID` (default George, `JBFqnCBsd6RMkjVDRZzb`) and `ELEVENLABS_MODEL_ID` (default `eleven_flash_v2_5`).
+Optional:
+
+- Speechify: `SPEECHIFY_VOICE_ID` (default `geffen_32`) and `SPEECHIFY_MODEL_ID` (default `simba-3.2`, English).
+- ElevenLabs: `ELEVENLABS_VOICE_ID` (default George, `JBFqnCBsd6RMkjVDRZzb`) and `ELEVENLABS_MODEL_ID` (default `eleven_flash_v2_5`).
 
 ## Install
 
@@ -91,10 +103,10 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 
 - **Finding the text.** The plugin walks the rendered transcript for the markdown view whose content matches each answer part. It reads that view's prose blocks: paragraphs, headings and list items.
 - **Building the script.** The prose is turned into a plain-text script, with a map from every script character back to its position in the markdown.
-- **Speech.** The script goes to ElevenLabs' streaming `with-timestamps` endpoint. Playback starts on the first chunk.
+- **Speech.** The script goes to Speechify's or ElevenLabs' streaming `with-timestamps` endpoint. Playback starts on the first chunk. ElevenLabs times every character; Speechify times every word, and each character takes the start of its word.
 - **Audio.** Audio is piped through `ffmpeg` (for the seek and the `atempo` speed change) into opentui's audio output.
 - **Highlighting.** Every 40 ms the playback position is mapped to a word. That word and its sentence are highlighted by extending the block's `onHighlight`, using two styles registered on the block's syntax style and tinted from the theme's primary colour.
-- **Cache.** Audio and timings are cached in `~/.cache/opencode/speech/`, keyed by a hash of the voice, the model and the text.
+- **Cache.** Audio and timings are cached in `~/.cache/opencode/speech/`, keyed by a hash of the voice, the model and the text. A cached reading from either provider is reused before anything new is requested.
 
 ## License
 

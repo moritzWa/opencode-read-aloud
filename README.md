@@ -2,6 +2,10 @@
 
 **Reads OpenCode's last answer aloud and highlights each word as it is spoken.** Press `ctrl+s` in a session to start. Press it again to pause or resume.
 
+https://github.com/moritzWa/opencode-read-aloud/raw/demo-video/assets/demo.mp4
+
+<video src="https://github.com/moritzWa/opencode-read-aloud/raw/demo-video/assets/demo.mp4" controls muted="false"></video>
+
 ```
      Otters hold hands while they sleep so they don't [drift] apart. Sea otters also keep a
      favorite rock in a skin pouch under their arm for cracking open shellfish.

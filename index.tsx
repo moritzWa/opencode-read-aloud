@@ -5,6 +5,7 @@ import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, isAnswerText } from "./answer"
+import { remote } from "./media"
 import { load, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
 import { blocks, clear, markdowns, pick, reveal, show, transcript, type Spot } from "./view"
@@ -77,8 +78,19 @@ const tui: TuiPlugin = async (api, options) => {
 
   let current: Reading | undefined
   const [rate, setRate] = createSignal(clampRate(api.kv.get(KV_RATE, DEFAULT_RATE)))
-  const [status, setStatus] = createSignal<Status>("idle")
+  const [status, setStatusSignal] = createSignal<Status>("idle")
   const [sessionID, setSessionID] = createSignal<string>()
+
+  const media = remote((command) => {
+    if (command === "stop") return stop()
+    if (command === "pause") return pause()
+    if (command === "play" && status() !== "paused") return
+    void exclusive(step)
+  })
+  function setStatus(next: Status) {
+    setStatusSignal(next)
+    media.set(next === "loading" ? "playing" : next)
+  }
 
   const fail = (error: unknown) =>
     api.ui.toast({ variant: "error", message: error instanceof Error ? error.message : String(error) })
@@ -353,6 +365,7 @@ const tui: TuiPlugin = async (api, options) => {
     if (pending) clearTimeout(pending)
     for (const off of offs) if (typeof off === "function") off()
     stop()
+    media.dispose()
   })
 }
 

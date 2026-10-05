@@ -24,6 +24,8 @@
     "index.tsx",
     "answer.ts",
     "player.ts",
+    "media.ts",
+    "nowplaying.swift",
     "script.ts",
     "view.ts",
     "README.md",

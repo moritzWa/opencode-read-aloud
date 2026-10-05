@@ -38,7 +38,7 @@ echo sk_... > ~/.local/share/opencode/elevenlabs.key
 
 Optional:
 
-- Speechify: `SPEECHIFY_VOICE_ID` (default `geffen_32`) and `SPEECHIFY_MODEL_ID` (default `simba-3.2`, English).
+- Speechify: `SPEECHIFY_VOICE_ID` (default Dominic, `dominic_32`) and `SPEECHIFY_MODEL_ID` (default `simba-3.2`, English). `GET https://api.speechify.ai/v1/voices` lists the others; `geffen_32` is a female voice made for the same model.
 - ElevenLabs: `ELEVENLABS_VOICE_ID` (default George, `JBFqnCBsd6RMkjVDRZzb`) and `ELEVENLABS_MODEL_ID` (default `eleven_flash_v2_5`).
 
 ## Install

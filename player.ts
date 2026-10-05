@@ -23,7 +23,8 @@ const PROVIDERS: Provider[] = [
     name: "speechify",
     env: "SPEECHIFY_API_KEY",
     keyFile: path.join(DATA, "speechify.key"),
-    voice: process.env.SPEECHIFY_VOICE_ID ?? "geffen_32",
+    // Dominic, a deep American voice made for simba-3.2.
+    voice: process.env.SPEECHIFY_VOICE_ID ?? "dominic_32",
     model: process.env.SPEECHIFY_MODEL_ID ?? "simba-3.2",
     synthesize: speechify,
   },

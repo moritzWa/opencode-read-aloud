@@ -2,13 +2,9 @@
 
 **Reads OpenCode's last answer aloud and highlights each word as it is spoken.** Press `ctrl+s` in a session to start. Press it again to pause or resume.
 
-```
-     Otters hold hands while they sleep so they don't [drift] apart. Sea otters also keep a
-     favorite rock in a skin pouch under their arm for cracking open shellfish.
+[![OpenCode reading an answer aloud, each word highlighted as it is spoken](assets/demo.gif)](assets/demo.mp4)
 
-┃  Build · Claude Opus 5.5 Cursor                                       pause - 1.7x + stop
-╹▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀
-```
+The same 19 seconds with sound: [assets/demo.mp4](assets/demo.mp4).
 
 - The sentence being read gets a faint tint and the current word a stronger one. The transcript scrolls to keep that paragraph on screen.
 - Only the answer is read: the text after the last tool call of the latest assistant message. Code blocks, tables and rules are skipped.

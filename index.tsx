@@ -228,6 +228,19 @@ const tui: TuiPlugin = async (api, options) => {
     setStatus("idle")
   }
 
+  /** The footer's stop: back to the start with the controls still up, so play reads it again. */
+  function rewind() {
+    const reading = current
+    if (!reading) return stop()
+    if (starting) held = true
+    halt(reading)
+    reading.position = 0
+    reading.word = -1
+    reading.node = undefined
+    clear()
+    setStatus("paused")
+  }
+
   async function restart() {
     const answer = currentAnswer(api)
     if (!answer) return api.ui.toast({ variant: "info", message: "No answer to read yet" })
@@ -393,7 +406,7 @@ const tui: TuiPlugin = async (api, options) => {
                 rate={rate()}
                 onToggle={() => void exclusive(step)}
                 onSpeed={(delta) => void speed(delta)}
-                onStop={stop}
+                onStop={rewind}
               />
             </Show>
           </box>

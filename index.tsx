@@ -6,7 +6,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, isAnswerText } from "./answer"
 import { remote } from "./media"
-import { load, play, type Clip, type Playback } from "./player"
+import { configure, load, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
 import { blocks, clear, markdowns, pick, reveal, show, transcript, type Spot } from "./view"
 
@@ -74,6 +74,7 @@ type Reading = {
 const tui: TuiPlugin = async (api, options) => {
   const opts = options ?? {}
   const placement = opts.placement === "footer" ? "footer" : "right"
+  configure(opts)
   const keys = createBindingLookup<Renderable, KeyEvent>(
     { ...defaultKeybinds, ...(record(opts.keybinds) ? opts.keybinds : {}) } as Record<string, string>,
     { commandMap: keybindNames },

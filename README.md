@@ -36,7 +36,7 @@ export ELEVENLABS_API_KEY=sk_...
 echo sk_... > ~/.local/share/opencode/elevenlabs.key
 ```
 
-Optional:
+The voice and model can be changed with the `speechify` and `elevenlabs` [options](#options), or with these environment variables:
 
 - Speechify: `SPEECHIFY_VOICE_ID` (default Dominic, `dominic_32`) and `SPEECHIFY_MODEL_ID` (default `simba-3.2`, English). `GET https://api.speechify.ai/v1/voices` lists the others; `geffen_32` is a female voice made for the same model.
 - ElevenLabs: `ELEVENLABS_VOICE_ID` (default George, `JBFqnCBsd6RMkjVDRZzb`) and `ELEVENLABS_MODEL_ID` (default `eleven_flash_v2_5`).
@@ -73,7 +73,8 @@ OpenCode loads the TypeScript source directly, so there is nothing to build.
     [
       "opencode-read-aloud",
       {
-        "keybinds": { "speech_toggle": "ctrl+s", "speech_faster": "alt+=", "speech_slower": "alt+-" }
+        "keybinds": { "speech_toggle": "ctrl+s", "speech_faster": "alt+=", "speech_slower": "alt+-" },
+        "speechify": { "voice": "hugh_32" }
       }
     ]
   ]
@@ -84,6 +85,8 @@ OpenCode loads the TypeScript source directly, so there is nothing to build.
 | ----------- | --------- | -------------------------------------------------------------------------- |
 | `keybinds`  | see below | Keys for the commands. `"none"` or `false` unbinds one.                    |
 | `placement` | `"right"` | `"right"` puts the controls on the prompt row (`session_prompt_right`). `"footer"` uses a `session_prompt_footer` slot, for OpenCode builds that have one. |
+| `speechify` | none | `{ "voice", "model" }` for Speechify. Overrides `SPEECHIFY_VOICE_ID` and `SPEECHIFY_MODEL_ID`. |
+| `elevenlabs` | none | `{ "voice", "model" }` for ElevenLabs. Overrides `ELEVENLABS_VOICE_ID` and `ELEVENLABS_MODEL_ID`. |
 
 | Keybind          | Default | Command                            |
 | ---------------- | ------- | ---------------------------------- |

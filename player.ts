@@ -39,6 +39,16 @@ const PROVIDERS: Provider[] = [
   },
 ]
 
+/** Plugin options `speechify` and `elevenlabs`, each `{ voice, model }`, win over the environment. */
+export function configure(options: Record<string, unknown>) {
+  for (const provider of PROVIDERS) {
+    const settings = options[provider.name]
+    if (!settings || typeof settings !== "object") continue
+    if ("voice" in settings && typeof settings.voice === "string") provider.voice = settings.voice
+    if ("model" in settings && typeof settings.model === "string") provider.model = settings.model
+  }
+}
+
 let audio: Audio | null | undefined
 
 function output() {

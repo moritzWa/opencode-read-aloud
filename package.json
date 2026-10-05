@@ -1,7 +1,7 @@
 {
   "name": "opencode-read-aloud",
   "version": "0.1.0",
-  "description": "OpenCode TUI plugin: read the last answer aloud with ElevenLabs, highlighting each word as it is spoken.",
+  "description": "OpenCode TUI plugin: read the last answer aloud with Speechify or ElevenLabs, highlighting each word as it is spoken.",
   "license": "MIT",
   "type": "module",
   "keywords": [
@@ -12,7 +12,8 @@
     "tts",
     "text-to-speech",
     "read-aloud",
-    "elevenlabs"
+    "elevenlabs",
+    "speechify"
   ],
   "oc-plugin": [
     "tui"

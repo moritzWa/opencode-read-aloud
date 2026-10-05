@@ -109,7 +109,7 @@ const tui: TuiPlugin = async (api, options) => {
     return root && markdowns(root).find((view) => view.content === text)
   }
 
-  // A second press while the first one is still waiting on ElevenLabs or ffmpeg
+  // A second press while the first one is still waiting on the speech service or ffmpeg
   // would otherwise start a second playback on top of it.
   let busy = false
   async function exclusive(run: () => Promise<unknown>) {

@@ -14,6 +14,7 @@ const id = "opencode-read-aloud"
 
 const command = {
   toggle: "speech.toggle",
+  pause: "speech.pause",
   stop: "speech.stop",
   restart: "speech.restart",
   faster: "speech.faster",
@@ -23,6 +24,7 @@ const command = {
 // Option names match the keybind names the speech feature had in OpenCode's own config.
 const keybindNames = {
   speech_toggle: command.toggle,
+  speech_pause: command.pause,
   speech_stop: command.stop,
   speech_restart: command.restart,
   speech_faster: command.faster,
@@ -31,6 +33,7 @@ const keybindNames = {
 
 const defaultKeybinds = {
   speech_toggle: "ctrl+s",
+  speech_pause: "none",
   speech_stop: "none",
   speech_restart: "none",
   speech_faster: "none",
@@ -152,7 +155,10 @@ const tui: TuiPlugin = async (api, options) => {
     setSessionID(answer.sessionID)
     setStatus("loading")
     const clip = await load(script.text).catch(fail)
-    if (!clip) return setStatus("idle")
+    if (!clip) {
+      held = false
+      return setStatus("idle")
+    }
     current = {
       sessionID: answer.sessionID,
       messageID: answer.messageID,
@@ -164,14 +170,24 @@ const tui: TuiPlugin = async (api, options) => {
     }
     const reading = current
     const from = spot ? await timeAt(reading, spot, resolve) : 0
-    if (current === reading) await start(from ?? 0)
+    if (current !== reading) return
+    if (held) return hold(reading, from ?? 0)
+    await start(from ?? 0)
   }
 
   async function start(from: number) {
     const reading = current
     if (!reading) return
-    const playback = await play(reading.clip, Math.max(0, from), rate()).catch(fail)
+    held = false
+    starting = true
+    const playback = await play(reading.clip, Math.max(0, from), rate())
+      .catch(fail)
+      .finally(() => (starting = false))
     if (!playback || current !== reading) return playback?.stop()
+    if (held) {
+      playback.stop()
+      return hold(reading, from)
+    }
     reading.playback = playback
     setStatus("playing")
     reading.timer = setInterval(() => tick(reading), TICK_MS)
@@ -182,15 +198,30 @@ const tui: TuiPlugin = async (api, options) => {
     })
   }
 
+  // A pause that lands while audio is still loading or starting, as when
+  // agentview hides the TUI right after ctrl+s, holds the reading once it is ready.
+  let starting = false
+  let held = false
+
   function pause() {
     const reading = current
-    if (!reading?.playback) return
+    if (!reading?.playback) {
+      if (starting || status() === "loading") held = true
+      return
+    }
     reading.position = reading.playback.position()
     halt(reading)
     setStatus("paused")
   }
 
+  function hold(reading: Reading, from: number) {
+    held = false
+    reading.position = Math.max(0, from)
+    setStatus("paused")
+  }
+
   function stop() {
+    held = false
     if (current) halt(current)
     current = undefined
     clear()
@@ -288,6 +319,17 @@ const tui: TuiPlugin = async (api, options) => {
         suggested: true,
         run() {
           void exclusive(step)
+          return true
+        },
+      },
+      {
+        name: command.pause,
+        title: "Pause reading aloud",
+        category: "Speech",
+        namespace: "palette",
+        suggested: () => status() === "playing",
+        run() {
+          pause()
           return true
         },
       },

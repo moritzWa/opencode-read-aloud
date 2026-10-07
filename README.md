@@ -12,6 +12,7 @@ The same 20 seconds with sound: [assets/demo.mp4](assets/demo.mp4).
 - The controls on the prompt row are clickable: play/pause, slower `-`, faster `+`, and stop. On terminals narrower than 80 columns only play/pause and the speed are shown.
 - Speed changes keep the pitch and are remembered between sessions. The default is 1.7x.
 - On macOS the AirPods button and the keyboard's play/pause key pause and resume reading while it is active, instead of starting your music. This needs the Xcode command line tools (`xcode-select --install`), which compile a small helper on first use. Once reading stops, the keys go back to your music app.
+- Speech is synthesized a few sentences ahead of playback, so stopping after the first sentence only pays for the first sentence or two.
 - Audio is cached, so replaying an answer or jumping around in it costs nothing after the first read.
 
 ## Requirements
@@ -102,10 +103,10 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 
 - **Finding the text.** The plugin walks the rendered transcript for the markdown view whose content matches each answer part. It reads that view's prose blocks: paragraphs, headings and list items.
 - **Building the script.** The prose is turned into a plain-text script, with a map from every script character back to its position in the markdown.
-- **Speech.** The script goes to Speechify's or ElevenLabs' streaming `with-timestamps` endpoint. Playback starts on the first chunk. ElevenLabs times every character; Speechify times every word, and each character takes the start of its word.
+- **Speech.** The script is split after sentence ends into pieces that grow from about 200 characters to 2,000. Each piece goes to Speechify's or ElevenLabs' streaming `with-timestamps` endpoint only when playback is within 8 seconds of the audio so far running out, or when a word in it is clicked. Playback starts on the first chunk. ElevenLabs times every character; Speechify times every word, and each character takes the start of its word. Each piece's timings are shifted by the length of the audio before it, which both providers' constant 128 kbps mp3 gives from its size.
 - **Audio.** Audio is piped through `ffmpeg` (for the seek and the `atempo` speed change) into opentui's audio output.
 - **Highlighting.** Every 40 ms the playback position is mapped to a word. That word and its sentence are highlighted by extending the block's `onHighlight`, using two styles registered on the block's syntax style and tinted from the theme's primary colour.
-- **Cache.** Audio and timings are cached in `~/.cache/opencode/speech/`, keyed by a hash of the voice, the model and the text. A cached reading from either provider is reused before anything new is requested.
+- **Cache.** Audio and timings are cached in `~/.cache/opencode/speech/`, one file per piece, keyed by a hash of the voice, the model and the piece's text. A whole-answer reading cached by an earlier version, from either provider, is reused before anything new is requested.
 
 ## License
 

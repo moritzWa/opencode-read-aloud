@@ -8,6 +8,16 @@ import { Audio } from "@opentui/core"
 const DATA = path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), ".local", "share"), "opencode")
 const DIR = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".cache"), "opencode", "speech")
 
+// Answers are synthesized a piece at a time, just ahead of playback, since the services
+// bill every character sent and most readings stop after a sentence or two. Pieces end
+// on a sentence and grow from the first, which is small so playback starts quickly.
+const FIRST_PIECE = 200
+const MAX_PIECE = 2000
+// Seconds of 1x audio left before the next piece is requested.
+const LEAD = 8
+// Both providers are asked for constant 128 kbps mp3, so a piece's length is its size.
+const BYTES_PER_SECOND = 128_000 / 8
+
 type Provider = {
   name: string
   env: string
@@ -73,7 +83,8 @@ function createAudio() {
  * Synthesized audio for one script. While the request is still streaming,
  * `chunks` and `starts` grow and `next()` resolves on every arrival, so playback
  * can begin on the first chunk. `starts` holds one start time per character of
- * the script, in seconds of 1x audio.
+ * the script, in seconds of 1x audio. Nothing past the first piece is synthesized
+ * until `ahead` reports playback near it or `need` asks for a character in it.
  */
 export type Clip = {
   chunks: Uint8Array[]
@@ -81,6 +92,8 @@ export type Clip = {
   done: boolean
   error?: Error
   next: () => Promise<void>
+  ahead: (time: number) => void
+  need: (char: number) => void
 }
 
 export type Playback = {
@@ -103,20 +116,85 @@ export async function load(text: string): Promise<Clip> {
     throw new Error(
       `Set SPEECHIFY_API_KEY or ELEVENLABS_API_KEY, or write the key to ${PROVIDERS.map((p) => p.keyFile).join(" or ")}`,
     )
-  const cache = files(found.provider, text)
+  const provider = found.provider
+  const ranges = pieces(text)
   const result = clip({ chunks: [], starts: [], done: false })
-  void found.provider
-    .synthesize(text, found.key, found.provider.voice, found.provider.model, result)
-    .then(async () => {
-      await mkdir(DIR, { recursive: true })
-      await Bun.write(cache.audio, new Blob(result.chunks as BlobPart[]))
-      await Bun.write(cache.meta, JSON.stringify({ starts: result.starts }))
-    })
-    .catch((error: unknown) => {
-      result.error = error instanceof Error ? error : new Error(String(error))
-    })
-    .finally(() => result.finish())
+  // Pieces are synthesized one after another, so each begins where the audio so far ends.
+  let requested = 0
+  let finished = 0
+  let end = 0
+  let chain = Promise.resolve()
+  const request = (count: number) => {
+    while (requested < Math.min(count, ranges.length)) {
+      const range = ranges[requested++]
+      chain = chain
+        .then(async () => {
+          if (result.error) return
+          end += await piece(provider, found.key, text.slice(range.start, range.end), end, result)
+          finished++
+          if (finished === ranges.length) result.finish()
+        })
+        .catch((error: unknown) => {
+          result.error = error instanceof Error ? error : new Error(String(error))
+          result.finish()
+        })
+    }
+  }
+  result.ahead = (time) => {
+    if (finished === requested && time >= end - LEAD) request(requested + 1)
+  }
+  result.need = (char) => request(ranges.findIndex((range) => range.end > char) + 1 || ranges.length)
+  request(1)
   return result
+}
+
+/**
+ * Synthesizes one piece onto the end of `result`, or reuses its cached audio, and
+ * returns its length in seconds of 1x audio.
+ */
+async function piece(provider: Provider, key: string, text: string, offset: number, result: Target) {
+  const cache = files(provider, text)
+  const local: Target = (await cache.meta.exists())
+    ? clip({ chunks: [await cache.audio.bytes()], starts: (await cache.meta.json()).starts, done: true })
+    : clip({ chunks: [], starts: [], done: false })
+  let sentChunks = 0
+  let sentStarts = 0
+  const forward = () => {
+    // Every response opens with an ID3 tag, which the decoder rejects mid-stream.
+    while (sentChunks < local.chunks.length)
+      result.chunks.push(sentChunks++ ? local.chunks[sentChunks - 1] : untagged(local.chunks[0]))
+    while (sentStarts < Math.min(local.starts.length, text.length)) result.starts.push(offset + local.starts[sentStarts++])
+    result.wake()
+  }
+  if (!local.done) {
+    local.wake = forward
+    await provider.synthesize(text, key, provider.voice, provider.model, local)
+    local.chunks = local.chunks.map((chunk, index) => (index ? chunk : untagged(chunk)))
+    // Trailing spaces after the last word have no speech mark; they share its start.
+    while (local.starts.length < text.length) local.starts.push(local.starts.at(-1) ?? 0)
+    await mkdir(DIR, { recursive: true })
+    await Bun.write(cache.audio, new Blob(local.chunks as BlobPart[]))
+    await Bun.write(cache.meta, JSON.stringify({ starts: local.starts.slice(0, text.length) }))
+  }
+  forward()
+  return local.chunks.reduce((sum, chunk) => sum + chunk.length, 0) / BYTES_PER_SECOND
+}
+
+/** Splits the text after sentence ends into pieces of at least FIRST_PIECE, then three times the last. */
+export function pieces(text: string) {
+  const ends = [...text.matchAll(/[.!?:;]\s+|\n+/g)].map((match) => match.index + match[0].length)
+  return [...ends, text.length].reduce<{ start: number; end: number }[]>((ranges, end) => {
+    const start = ranges.at(-1)?.end ?? 0
+    const size = Math.min(MAX_PIECE, FIRST_PIECE * 3 ** ranges.length)
+    if (end <= start || (end - start < size && end < text.length)) return ranges
+    return [...ranges, { start, end }]
+  }, [])
+}
+
+function untagged(chunk: Uint8Array) {
+  if (chunk[0] !== 0x49 || chunk[1] !== 0x44 || chunk[2] !== 0x33) return chunk
+  const size = (chunk[6] << 21) | (chunk[7] << 14) | (chunk[8] << 7) | chunk[9]
+  return chunk.subarray(10 + size + (chunk[5] & 0x10 ? 10 : 0))
 }
 
 /**
@@ -130,6 +208,7 @@ export async function play(source: Clip, from: number, rate: number): Promise<Pl
   // empty stream and surface as "Audio stream decoder failed" instead of its own error.
   while (!source.chunks.length && !source.done) await source.next()
   if (!source.chunks.length) throw source.error ?? new Error("The speech service returned no audio")
+  source.ahead(from)
   const seek = from > 0 ? ["-ss", from.toFixed(3)] : []
   const proc = Bun.spawn(
     [
@@ -156,20 +235,23 @@ export async function play(source: Clip, from: number, rate: number): Promise<Pl
     proc.kill()
     throw new Error("No audio output device")
   }
+  const position = () => {
+    const stats = stream.getStats()
+    return from + (Number(stats.framesPlayed) / stats.sampleRate) * rate
+  }
+  const timer = setInterval(() => source.ahead(position()), 250)
   return {
-    position: () => {
-      const stats = stream.getStats()
-      return from + (Number(stats.framesPlayed) / stats.sampleRate) * rate
-    },
+    position,
     stop: () => {
+      clearInterval(timer)
       stream.dispose()
       proc.kill()
     },
-    ended: new Promise((resolve) => {
+    ended: new Promise<void>((resolve) => {
       stream.once("ended", () => resolve())
       stream.once("disposed", () => resolve())
       stream.once("error", () => resolve())
-    }),
+    }).finally(() => clearInterval(timer)),
   }
 }
 
@@ -256,6 +338,8 @@ function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean }) 
     error: undefined as Error | undefined,
     next: () => new Promise<void>((resolve) => waiting.push(resolve)),
     wake: () => waiting.splice(0).forEach((resolve) => resolve()),
+    ahead: (_time: number) => {},
+    need: (_char: number) => {},
     finish() {
       result.done = true
       result.wake()

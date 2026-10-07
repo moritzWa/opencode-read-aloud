@@ -504,6 +504,7 @@ async function timeAt(reading: Reading, spot: Spot, resolve: (segment: Segment) 
   )
   const word = script.words.find((word) => word.end > char)
   if (char < 0 || !word) return
+  clip.need(word.start)
   while (clip.starts[word.start] === undefined && !clip.done) await clip.next()
   return clip.starts[word.start]
 }

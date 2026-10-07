@@ -24,6 +24,14 @@ test("keeps snake_case and escapes", () => {
   expect(build(["use my_var and \\*not\\* _this_"]).text).toBe("use my_var and *not* this.")
 })
 
+test("skips session ids, commit hashes and uuids but keeps names with numbers", () => {
+  const raw =
+    "One agent (session `ses_ee8a1a16affePZKE8lcTj934Yk`) at 7220bdb427, id 550e8400-e29b-41d4-a716-446655440000."
+  expect(build([raw]).text).toBe("One agent (session ) at , id .")
+  const names = "Use dominic_32 on simba-3.2, mp3_24000_128, iPhone15Pro, UTF-16 and 2026 in router.ts."
+  expect(build([names]).text).toBe(names)
+})
+
 test("skips ascii and box diagrams", () => {
   expect(diagram("┌──────┐\n│ box  │\n└──────┘")).toBe(true)
   expect(diagram("+------+\n| node |--->\n+------+")).toBe(true)

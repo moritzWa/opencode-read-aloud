@@ -20,6 +20,12 @@ export type Script = {
 const INLINE =
   /!\[[^\]]*\]\([^)]*\)|\[([^\]]+)\]\([^)]*\)|\[([^\]]+)\]\[[^\]]*\]|<https?:[^>]+>|https?:\/\/\S+|<\/?[a-zA-Z][^>]*>|\\([\\`*_{}[\]()#+\-.!~|>])|\*\*|__|~~|[*`]|(?<![A-Za-z0-9])_|_(?![A-Za-z0-9])/g
 
+// Session IDs, commit hashes and UUIDs are spoken letter by letter, so they are skipped.
+// A token counts as one when a run of 7+ letters and digits in it has 3+ digits and a
+// letter, which leaves names like dominic_32, simba-3.2, or iPhone15Pro.
+const TOKEN = /(?<![\w-])[A-Za-z0-9][\w-]*/g
+const ID_RUN = /^(?=.*[A-Za-z])(?=(?:.*\d){3})[A-Za-z0-9]{7,}$/
+
 const HEADING = /^#{1,6}\s+/
 const BOX = /[\u2500-\u259F]/g
 const SYMBOL = /[-|+/\\_=<>*#.:^~[\]()]/g
@@ -39,8 +45,12 @@ export function build(segments: readonly string[]): Script {
     if (diagram(raw)) return
     const before = chars.length
     const head = raw.match(HEADING)?.[0].length ?? 0
+    const ids = new Uint8Array(raw.length)
+    for (const match of raw.matchAll(TOKEN))
+      if (match[0].split(/[_-]/).some((run) => ID_RUN.test(run)))
+        ids.fill(1, match.index, match.index + match[0].length)
     const copy = (from: number, to: number) => {
-      for (let i = from; i < to; i++) emit(/\s/.test(raw[i]) ? " " : raw[i], seg, i)
+      for (let i = from; i < to; i++) if (!ids[i]) emit(/\s/.test(raw[i]) ? " " : raw[i], seg, i)
     }
     let last = head
     for (const match of raw.slice(head).matchAll(INLINE)) {

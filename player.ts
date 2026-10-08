@@ -24,6 +24,9 @@ const STALL_MS = 2500
 // A speech request with no response headers, or no new bytes, for this long has hung.
 const HEADERS_MS = 20_000
 const IDLE_MS = 30_000
+// playStream resolves once ffmpeg's first audio decodes, which takes well under a second;
+// longer means the engine has wedged, and the reading's lock would be held forever.
+const OPEN_MS = 5000
 
 // Next to OpenCode's own log, since the plugin's only other channel is a toast.
 const LOG = path.join(DATA, "log", "read-aloud.log")
@@ -259,6 +262,16 @@ function untagged(chunk: Uint8Array) {
  * the pitch-preserving tempo change, since opentui's audio has neither.
  */
 export async function play(source: Clip, from: number, rate: number): Promise<Playback> {
+  // A wedged engine gets one fresh replacement before the error reaches the user.
+  return attempt(source, from, rate).catch((error: unknown) => {
+    if (!(error instanceof Wedged)) throw error
+    return attempt(source, from, rate)
+  })
+}
+
+class Wedged extends Error {}
+
+async function attempt(source: Clip, from: number, rate: number): Promise<Playback> {
   const ffmpeg = Bun.which("ffmpeg")
   if (!ffmpeg) throw new Error("Reading aloud needs ffmpeg (brew install ffmpeg)")
   // A request that fails before any audio would otherwise reach the decoder as an
@@ -292,10 +305,20 @@ export async function play(source: Clip, from: number, rate: number): Promise<Pl
     // A kill is how every stop ends it; only ffmpeg's own failures are worth a line.
     if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await new Response(proc.stderr).text()).slice(-500) })
   })
-  void feed(source, proc.stdin, () => proc.killed).catch(() => {})
-  const stream = await output()
-    ?.playStream(proc.stdout, { format: "flac" })
-    .catch((error: unknown) => log("stream-failed", { error: String(error) }))
+  const fed = { bytes: 0 }
+  void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
+  const opening = output()?.playStream(proc.stdout, { format: "flac" })
+  const stream = await Promise.race([opening, Bun.sleep(OPEN_MS).then(() => "timeout" as const)]).catch(
+    (error: unknown) => log("stream-failed", { error: String(error) }),
+  )
+  if (stream === "timeout") {
+    // fed shows whether ffmpeg had input, so the log tells a starved ffmpeg from a stuck engine.
+    log("stream-timeout", { from: Number(from.toFixed(2)), fed: fed.bytes, chunks: source.chunks.length, done: source.done })
+    proc.kill("SIGKILL")
+    void opening?.then((late) => late.dispose(), () => {})
+    resetAudio()
+    throw new Wedged("The audio output did not start playing")
+  }
   if (!stream) {
     proc.kill("SIGKILL")
     throw new Error("No audio output device")
@@ -461,11 +484,14 @@ function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean }) 
   return result
 }
 
-async function feed(source: Clip, sink: Bun.FileSink, stopped: () => boolean) {
+async function feed(source: Clip, sink: Bun.FileSink, stopped: () => boolean, fed: { bytes: number }) {
   let sent = 0
   // Without the check a stopped playback would wait on a reading nobody hears.
   while (!stopped()) {
-    while (sent < source.chunks.length) sink.write(source.chunks[sent++])
+    while (sent < source.chunks.length) {
+      fed.bytes += source.chunks[sent].length
+      sink.write(source.chunks[sent++])
+    }
     await sink.flush()
     if (source.done) {
       await sink.end()

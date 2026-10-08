@@ -96,9 +96,39 @@ export function reveal(root: Renderable, node: Renderable) {
   scroll.scrollBy(top - 1)
 }
 
-/** Option+click on a prose word reports where in the block's raw markdown it landed. */
+// Terminals report no click count, so a double-click is two plain releases close
+// in time and place. opentui marks every release on text as isDragging (a press
+// starts a selection), so a drag is told apart by whether it selected anything.
+const DOUBLE_MS = 400
+let lastClick: { x: number; y: number; at: number } | undefined
+
+function doubleClick(event: MouseEvent) {
+  if (selected(event) || event.modifiers.shift || event.modifiers.ctrl || event.modifiers.alt) {
+    lastClick = undefined
+    return false
+  }
+  const now = Date.now()
+  const hit =
+    lastClick !== undefined &&
+    now - lastClick.at <= DOUBLE_MS &&
+    Math.abs(event.x - lastClick.x) <= 1 &&
+    event.y === lastClick.y
+  lastClick = hit ? undefined : { x: event.x, y: event.y, at: now }
+  return hit
+}
+
+function selected(event: MouseEvent) {
+  const target = event.target as { getSelectedText?: () => string } | null
+  return Boolean(target?.getSelectedText?.())
+}
+
+/**
+ * Option+click or a double-click on a prose word reports where in the block's raw
+ * markdown it landed. Double-click exists because macOS hides the frontmost app
+ * when you Option+click into a background window, and terminals never report Cmd.
+ */
 export function pick(view: MarkdownRenderable, partID: string, messageID: string, event: MouseEvent): Spot | undefined {
-  if (!event.modifiers.alt) return
+  if (!event.modifiers.alt && !doubleClick(event)) return
   const node = blocks(view)?.find((node) => node === event.target)
   if (!node) return
   const offset = offsetAt(node, event.x, event.y)

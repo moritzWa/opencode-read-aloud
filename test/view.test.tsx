@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import { RGBA, SyntaxStyle, type MarkdownRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import { build, source } from "../script"
-import { blocks, clear, markdowns, offsetAt, show, tint } from "../view"
+import { blocks, clear, markdowns, offsetAt, pick, show, tint } from "../view"
 
 const colors = { background: RGBA.fromHex("#0a0a0a"), primary: RGBA.fromHex("#fab283") }
 
@@ -119,6 +119,42 @@ test("maps a clicked cell to its offset in the block's raw markdown", async () =
     expect(at("there")).toBe("here")
     expect(at("shame")).toBe("hame")
     expect(at("item")).toBe("tem")
+  } finally {
+    await Bun.sleep(50)
+    setup.renderer.destroy()
+  }
+}, 20000)
+
+test("picks a word on option+click or double-click, never on a single click or drag", async () => {
+  const { setup, settle, view } = await render("I found the likely bug here.", 40, 6)
+  try {
+    await settle(() => setup.captureCharFrame().includes("likely"))
+    const picks: string[] = []
+    view().onMouseUp = (event) => {
+      const spot = pick(view(), "part", "message", event)
+      if (spot) picks.push(spot.node.content.slice(spot.offset, spot.offset + 5))
+    }
+    const frame = setup.captureCharFrame().split("\n")
+    const y = frame.findIndex((row) => row.includes("likely"))
+    const x = frame[y].indexOf("likely") + 1
+
+    await setup.mockMouse.click(x, y)
+    expect(picks).toEqual([])
+    await Bun.sleep(450)
+    await setup.mockMouse.click(x, y)
+    expect(picks).toEqual([])
+
+    await Bun.sleep(450)
+    await setup.mockMouse.doubleClick(x, y)
+    expect(picks).toEqual(["ikely"])
+
+    await setup.mockMouse.click(x, y, undefined, { modifiers: { alt: true } })
+    expect(picks).toEqual(["ikely", "ikely"])
+
+    await Bun.sleep(450)
+    await setup.mockMouse.drag(x - 4, y, x + 3, y)
+    await setup.mockMouse.click(x + 3, y)
+    expect(picks).toEqual(["ikely", "ikely"])
   } finally {
     await Bun.sleep(50)
     setup.renderer.destroy()

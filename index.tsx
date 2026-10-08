@@ -6,7 +6,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, isAnswerText } from "./answer"
 import { remote } from "./media"
-import { configure, load, play, type Clip, type Playback } from "./player"
+import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
 import { blocks, clear, markdowns, pick, reveal, show, transcript, type Spot } from "./view"
 
@@ -69,6 +69,8 @@ type Reading = {
   node?: CodeRenderable
   playback?: Playback
   timer?: ReturnType<typeof setInterval>
+  // The output gets a fresh engine on its first two stalls; a third ends the reading.
+  stalls: number
 }
 
 const tui: TuiPlugin = async (api, options) => {
@@ -96,8 +98,11 @@ const tui: TuiPlugin = async (api, options) => {
     media.set(next === "loading" ? "playing" : next)
   }
 
-  const fail = (error: unknown) =>
-    api.ui.toast({ variant: "error", message: error instanceof Error ? error.message : String(error) })
+  const fail = (error: unknown) => {
+    const message = error instanceof Error ? error.message : String(error)
+    log("toast-error", { message })
+    api.ui.toast({ variant: "error", message })
+  }
 
   const colors = () => ({ background: api.theme.current.background, primary: api.theme.current.primary })
 
@@ -168,6 +173,7 @@ const tui: TuiPlugin = async (api, options) => {
       clip,
       position: 0,
       word: -1,
+      stalls: 0,
     }
     const reading = current
     const from = spot ? await timeAt(reading, spot, resolve) : 0
@@ -192,8 +198,14 @@ const tui: TuiPlugin = async (api, options) => {
     reading.playback = playback
     setStatus("playing")
     reading.timer = setInterval(() => tick(reading), TICK_MS)
-    void playback.ended.then(() => {
+    void playback.ended.then((how) => {
       if (reading.playback !== playback) return
+      if (how === "stalled" && reading.stalls++ < 2) {
+        reading.position = playback.position()
+        halt(reading)
+        return exclusive(() => start(reading.position - RESUME_REWIND))
+      }
+      if (how === "stalled") fail(new Error("The audio output stopped playing; check the output device"))
       if (reading.clip.error) fail(reading.clip.error)
       stop()
     })

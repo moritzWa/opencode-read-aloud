@@ -1,6 +1,7 @@
 import path from "path"
 import os from "os"
 import { mkdir } from "node:fs/promises"
+import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs"
 import { Audio } from "@opentui/core"
 
 // The same folders OpenCode itself uses, so the key files and the audio cache are
@@ -17,6 +18,30 @@ const MAX_PIECE = 2000
 const LEAD = 8
 // Both providers are asked for constant 128 kbps mp3, so a piece's length is its size.
 const BYTES_PER_SECOND = 128_000 / 8
+// Audio decoded and waiting for this long without a frame reaching the speakers means the
+// output is dead, as after the default device switches to AirPods under a running engine.
+const STALL_MS = 2500
+// A speech request with no response headers, or no new bytes, for this long has hung.
+const HEADERS_MS = 20_000
+const IDLE_MS = 30_000
+
+// Next to OpenCode's own log, since the plugin's only other channel is a toast.
+const LOG = path.join(DATA, "log", "read-aloud.log")
+const LOG_MAX = 1_000_000
+
+/** Appends one line to the log, rotating it to `.1` past LOG_MAX. Never throws. */
+export function log(event: string, data: Record<string, unknown> = {}) {
+  try {
+    mkdirSync(path.dirname(LOG), { recursive: true })
+    if ((statSync(LOG, { throwIfNoEntry: false })?.size ?? 0) > LOG_MAX) renameSync(LOG, `${LOG}.1`)
+    appendFileSync(LOG, `${new Date().toISOString()} pid=${process.pid} ${event} ${JSON.stringify(data)}\n`)
+  } catch {}
+}
+
+// ffmpeg ignores SIGTERM while blocked writing to a pipe nobody reads, so every stop
+// kills it outright, and anything still running dies with the TUI.
+const children = new Set<Bun.Subprocess>()
+process.once("exit", () => children.forEach((child) => child.kill("SIGKILL")))
 
 type Provider = {
   name: string
@@ -60,21 +85,47 @@ export function configure(options: Record<string, unknown>) {
 }
 
 let audio: Audio | null | undefined
+// The default output when the engine started; the engine stays on that device.
+let device: string | undefined
 
 function output() {
+  if (audio && defaultDevice(audio) !== device) {
+    log("device-changed", { from: device, to: defaultDevice(audio) })
+    resetAudio()
+  }
   if (audio === undefined) audio = createAudio()
   if (!audio) return
-  if (!audio.isStarted() && !audio.start()) return
+  if (!audio.isStarted() && !audio.start()) {
+    log("engine-start-failed")
+    return
+  }
+  device ??= defaultDevice(audio)
   return audio
+}
+
+/** Drops the engine so the next playback opens a fresh one on the current default device. */
+function resetAudio() {
+  try {
+    audio?.dispose()
+  } catch {}
+  audio = undefined
+  device = undefined
+}
+
+function defaultDevice(engine: Audio) {
+  try {
+    return engine.listPlaybackDevices()?.find((entry) => entry.isDefault)?.name
+  } catch {}
 }
 
 function createAudio() {
   try {
     const created = Audio.create({ autoStart: false })
     // An "error" event with no listener would throw inside the host.
-    created.on("error", () => {})
+    created.on("error", (error, context) => log("engine-error", { action: context.action, error: error.message }))
     return created
-  } catch {
+  } catch (error) {
+    log("engine-create-failed", { error: String(error) })
     return null
   }
 }
@@ -99,7 +150,8 @@ export type Clip = {
 export type Playback = {
   position: () => number
   stop: () => void
-  ended: Promise<void>
+  /** "stalled" when the output stopped taking audio; the engine is already reset for a retry. */
+  ended: Promise<"ended" | "stalled">
 }
 
 export async function load(text: string): Promise<Clip> {
@@ -108,6 +160,7 @@ export async function load(text: string): Promise<Clip> {
     const cached = files(provider, text)
     if (!(await cached.meta.exists())) continue
     const timing: { starts: number[] } = await cached.meta.json()
+    log("load", { provider: provider.name, chars: text.length, cached: true })
     return clip({ chunks: [await cached.audio.bytes()], starts: timing.starts, done: true })
   }
 
@@ -118,6 +171,7 @@ export async function load(text: string): Promise<Clip> {
     )
   const provider = found.provider
   const ranges = pieces(text)
+  log("load", { provider: provider.name, chars: text.length, pieces: ranges.length })
   const result = clip({ chunks: [], starts: [], done: false })
   // Pieces are synthesized one after another, so each begins where the audio so far ends.
   let requested = 0
@@ -136,6 +190,7 @@ export async function load(text: string): Promise<Clip> {
         })
         .catch((error: unknown) => {
           result.error = error instanceof Error ? error : new Error(String(error))
+          log("synthesize-failed", { provider: provider.name, piece: requested, error: result.error.message })
           result.finish()
         })
     }
@@ -168,7 +223,9 @@ async function piece(provider: Provider, key: string, text: string, offset: numb
   }
   if (!local.done) {
     local.wake = forward
+    const began = Date.now()
     await provider.synthesize(text, key, provider.voice, provider.model, local)
+    log("synthesized", { provider: provider.name, chars: text.length, ms: Date.now() - began })
     local.chunks = local.chunks.map((chunk, index) => (index ? chunk : untagged(chunk)))
     // Trailing spaces after the last word have no speech mark; they share its start.
     while (local.starts.length < text.length) local.starts.push(local.starts.at(-1) ?? 0)
@@ -227,37 +284,70 @@ export async function play(source: Clip, from: number, rate: number): Promise<Pl
       "flac",
       "pipe:1",
     ],
-    { stdin: "pipe", stdout: "pipe", stderr: "ignore" },
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
   )
-  void feed(source, proc.stdin).catch(() => {})
-  const stream = await output()?.playStream(proc.stdout, { format: "flac" })
+  children.add(proc)
+  void proc.exited.then(async (code) => {
+    children.delete(proc)
+    // A kill is how every stop ends it; only ffmpeg's own failures are worth a line.
+    if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await new Response(proc.stderr).text()).slice(-500) })
+  })
+  void feed(source, proc.stdin, () => proc.killed).catch(() => {})
+  const stream = await output()
+    ?.playStream(proc.stdout, { format: "flac" })
+    .catch((error: unknown) => log("stream-failed", { error: String(error) }))
   if (!stream) {
-    proc.kill()
+    proc.kill("SIGKILL")
     throw new Error("No audio output device")
   }
+  log("play", { from: Number(from.toFixed(2)), rate })
   const position = () => {
     const stats = stream.getStats()
     return from + (Number(stats.framesPlayed) / stats.sampleRate) * rate
   }
-  const timer = setInterval(() => source.ahead(position()), 250)
+  // Waiting on the next piece from the network leaves the buffer empty; audio sitting in
+  // the buffer while no frame plays is the output itself having stopped.
+  let played = -1n
+  let since = Date.now()
+  let stall: () => void = () => {}
+  const timer = setInterval(() => {
+    const stats = stream.getStats()
+    source.ahead(position())
+    if (stats.framesPlayed !== played || stats.bufferedFrames === 0) {
+      played = stats.framesPlayed
+      since = Date.now()
+      return
+    }
+    if (Date.now() - since < STALL_MS) return
+    log("stalled", { at: Number(position().toFixed(2)), buffered: stats.bufferedFrames, state: stats.state, device })
+    resetAudio()
+    stall()
+  }, 250)
+  const stop = () => {
+    clearInterval(timer)
+    proc.kill("SIGKILL")
+    try {
+      stream.dispose()
+    } catch {}
+  }
   return {
     position,
-    stop: () => {
-      clearInterval(timer)
-      stream.dispose()
-      proc.kill()
-    },
-    ended: new Promise<void>((resolve) => {
-      stream.once("ended", () => resolve())
-      stream.once("disposed", () => resolve())
-      stream.once("error", () => resolve())
-    }).finally(() => clearInterval(timer)),
+    stop,
+    ended: new Promise<"ended" | "stalled">((resolve) => {
+      stall = () => resolve("stalled")
+      stream.once("ended", () => resolve("ended"))
+      stream.once("disposed", () => resolve("ended"))
+      stream.once("error", (error, context) => {
+        log("stream-error", { action: context.action, error: error.message })
+        resolve("ended")
+      })
+    }).finally(stop),
   }
 }
 
 /** ElevenLabs streams one JSON object per line, with a start time for every character. */
 async function elevenlabs(text: string, key: string, voice: string, model: string, target: Target) {
-  const response = await fetch(
+  const response = await post(
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream/with-timestamps?output_format=mp3_44100_128`,
     {
       method: "POST",
@@ -285,7 +375,7 @@ async function speechify(text: string, key: string, voice: string, model: string
   // UTF-16 index of every code point, since the script indexes the string itself.
   const units = [0]
   for (const char of text) units.push(units[units.length - 1] + char.length)
-  const response = await fetch("https://api.speechify.ai/v1/audio/stream/with-timestamps", {
+  const response = await post("https://api.speechify.ai/v1/audio/stream/with-timestamps", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
@@ -315,11 +405,22 @@ async function speechify(text: string, key: string, voice: string, model: string
   })
 }
 
+/** fetch that gives up when the response headers take longer than HEADERS_MS. */
+async function post(url: string, init: RequestInit) {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), HEADERS_MS)
+  return fetch(url, { ...init, signal: controller.signal })
+    .catch((error: unknown) => {
+      throw controller.signal.aborted ? new Error(`No response from ${new URL(url).host} in ${HEADERS_MS / 1000}s`) : error
+    })
+    .finally(() => clearTimeout(timer))
+}
+
 async function lines(body: NonNullable<Response["body"]>, each: (line: string) => void) {
   const reader = body.pipeThrough(new TextDecoderStream()).getReader()
   let buffer = ""
   while (true) {
-    const chunk = await reader.read()
+    const chunk = await idle(reader.read(), () => reader.cancel())
     if (chunk.done) break
     buffer += chunk.value
     const split = buffer.split("\n")
@@ -327,6 +428,18 @@ async function lines(body: NonNullable<Response["body"]>, each: (line: string) =
     split.forEach(each)
   }
   each(buffer)
+}
+
+/** Rejects when `read` has not settled within IDLE_MS, after calling `cancel`. */
+async function idle<T>(read: Promise<T>, cancel: () => unknown) {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      void Promise.resolve(cancel()).catch(() => {})
+      reject(new Error(`The speech service sent nothing for ${IDLE_MS / 1000}s`))
+    }, IDLE_MS)
+  })
+  return Promise.race([read, timeout]).finally(() => clearTimeout(timer))
 }
 
 type Target = ReturnType<typeof clip>
@@ -348,9 +461,10 @@ function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean }) 
   return result
 }
 
-async function feed(source: Clip, sink: Bun.FileSink) {
+async function feed(source: Clip, sink: Bun.FileSink, stopped: () => boolean) {
   let sent = 0
-  while (true) {
+  // Without the check a stopped playback would wait on a reading nobody hears.
+  while (!stopped()) {
     while (sent < source.chunks.length) sink.write(source.chunks[sent++])
     await sink.flush()
     if (source.done) {

@@ -28,6 +28,9 @@ const ID_RUN = /^(?=.*[A-Za-z])(?=(?:.*\d){3})[A-Za-z0-9]{7,}$/
 // Timestamps and other bare runs of 10+ digits, with the separator in front, so
 // paste-1791570388182.png is read as paste.png.
 const DIGITS = /[-_]?(?<![A-Za-z0-9])\d{10,}(?![A-Za-z0-9])/g
+// Line references after a file name (script.ts:28-35, x.ts:12:4, file.py#L40) are
+// dropped, so "script.ts:28-35" is read as "script.ts".
+const LINES = /(?<=\.[A-Za-z][A-Za-z0-9]{0,7})(?::\d+(?:[-–:]\d+)*|#L\d+(?:-L?\d+)?)(?![\w])/g
 // File paths with two or more slashes are read as their last part, so
 // /Users/m/.local/state/agentview/images/x.png is just x.png. Needs a letter so
 // dates like 10/09/2026 survive.
@@ -57,6 +60,7 @@ export function build(segments: readonly string[]): Script {
       if (match[0].split(/[_-]/).some((run) => ID_RUN.test(run)))
         ids.fill(1, match.index, match.index + match[0].length)
     for (const match of raw.matchAll(DIGITS)) ids.fill(1, match.index, match.index + match[0].length)
+    for (const match of raw.matchAll(LINES)) ids.fill(1, match.index, match.index + match[0].length)
     for (const match of raw.matchAll(PATH)) {
       if (!/[A-Za-z]/.test(match[0])) continue
       const trimmed = match[0].replace(/\/+$/, "")

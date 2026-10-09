@@ -25,6 +25,13 @@ const INLINE =
 // letter, which leaves names like dominic_32, simba-3.2, or iPhone15Pro.
 const TOKEN = /(?<![\w-])[A-Za-z0-9][\w-]*/g
 const ID_RUN = /^(?=.*[A-Za-z])(?=(?:.*\d){3})[A-Za-z0-9]{7,}$/
+// Timestamps and other bare runs of 10+ digits, with the separator in front, so
+// paste-1791570388182.png is read as paste.png.
+const DIGITS = /[-_]?(?<![A-Za-z0-9])\d{10,}(?![A-Za-z0-9])/g
+// File paths with two or more slashes are read as their last part, so
+// /Users/m/.local/state/agentview/images/x.png is just x.png. Needs a letter so
+// dates like 10/09/2026 survive.
+const PATH = /(?<![\w.~/-])(?:~|\.{1,2})?\/?(?:[\w.@-]+\/){2,}[\w.@-]*/g
 
 const HEADING = /^#{1,6}\s+/
 const BOX = /[\u2500-\u259F]/g
@@ -49,6 +56,13 @@ export function build(segments: readonly string[]): Script {
     for (const match of raw.matchAll(TOKEN))
       if (match[0].split(/[_-]/).some((run) => ID_RUN.test(run)))
         ids.fill(1, match.index, match.index + match[0].length)
+    for (const match of raw.matchAll(DIGITS)) ids.fill(1, match.index, match.index + match[0].length)
+    for (const match of raw.matchAll(PATH)) {
+      if (!/[A-Za-z]/.test(match[0])) continue
+      const trimmed = match[0].replace(/\/+$/, "")
+      ids.fill(1, match.index, match.index + trimmed.lastIndexOf("/") + 1)
+      ids.fill(1, match.index + trimmed.length, match.index + match[0].length)
+    }
     const copy = (from: number, to: number) => {
       for (let i = from; i < to; i++) if (!ids[i]) emit(/\s/.test(raw[i]) ? " " : raw[i], seg, i)
     }

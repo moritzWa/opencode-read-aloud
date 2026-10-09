@@ -43,6 +43,14 @@ test("reads file paths as their last part and drops long digit runs", () => {
   expect(build([kept]).text).toBe(kept)
 })
 
+test("drops line numbers after file names", () => {
+  expect(build(["The change is in `script.ts:28-35` and script.ts:56, see x.py#L40 and y.ts:12:4."]).text).toBe(
+    "The change is in script.ts and script.ts, see x.py and y.ts.",
+  )
+  const kept = "Meet at 10:30, ratio 3:2, version 1.2:3 is fine."
+  expect(build([kept]).text).toBe(kept)
+})
+
 test("skips ascii and box diagrams", () => {
   expect(diagram("┌──────┐\n│ box  │\n└──────┘")).toBe(true)
   expect(diagram("+------+\n| node |--->\n+------+")).toBe(true)

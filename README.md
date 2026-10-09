@@ -7,7 +7,7 @@
 The same 20 seconds with sound: [assets/demo.mp4](assets/demo.mp4).
 
 - The sentence being read gets a faint tint and the current word a stronger one. The transcript scrolls to keep that paragraph on screen.
-- Only the answer is read: the text after the last tool call of the latest assistant message. Code blocks, tables and rules are skipped, and so are long IDs like session IDs, commit hashes, UUIDs and timestamps. File paths are read as just their file name.
+- Only the answer is read: the text after the last tool call of the latest assistant message. Code blocks, tables and rules are skipped, and so are long IDs like session IDs, commit hashes, UUIDs and timestamps. File paths are read as just their file name, without line numbers.
 - **Double-click** or **Option+click** (alt+click) any word of an answer to start reading from that word. This works for older answers too. Double-click avoids a macOS quirk: Option+clicking into a background window hides the app you came from. Cmd+click cannot work, terminals never report Cmd.
 - The controls on the prompt row are clickable: play/pause, slower `-`, faster `+`, and stop. On terminals narrower than 80 columns only play/pause and the speed are shown.
 - Speed changes keep the pitch and are remembered between sessions. The default is 1.7x.

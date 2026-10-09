@@ -32,6 +32,17 @@ test("skips session ids, commit hashes and uuids but keeps names with numbers", 
   expect(build([names]).text).toBe(names)
 })
 
+test("reads file paths as their last part and drops long digit runs", () => {
+  expect(build(["Saved to /Users/m/.local/state/agentview/images/paste-1791570388182.png now."]).text).toBe(
+    "Saved to paste.png now.",
+  )
+  expect(build(["Edit `packages/opencode/src/x.ts` and ~/Code/opencode/ here."]).text).toBe(
+    "Edit x.ts and opencode here.",
+  )
+  const kept = "Read src/x.ts, and/or wait until 10/09/2026."
+  expect(build([kept]).text).toBe(kept)
+})
+
 test("skips ascii and box diagrams", () => {
   expect(diagram("┌──────┐\n│ box  │\n└──────┘")).toBe(true)
   expect(diagram("+------+\n| node |--->\n+------+")).toBe(true)

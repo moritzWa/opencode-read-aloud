@@ -433,7 +433,7 @@ async function speechify(text: string, key: string, voice: string, model: string
  * closes idle keep-alive connections, and the next request on one fails at once with
  * "The socket connection was closed unexpectedly"; a retry opens a fresh connection.
  */
-async function post(url: string, init: RequestInit, retried = false): Promise<Response> {
+export async function post(url: string, init: RequestInit, retried = false): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), HEADERS_MS)
   return fetch(url, { ...init, signal: controller.signal })

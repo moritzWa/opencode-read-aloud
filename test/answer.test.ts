@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
-import { finalAnswer } from "../answer"
+import { finalAnswer, resumes } from "../answer"
 
 const message = (id: string, role: "user" | "assistant") => ({ id, role }) as Message
 const text = (id: string, value: string, synthetic?: boolean) => ({ id, type: "text", text: value, synthetic }) as Part
@@ -35,4 +35,13 @@ test("falls back to an earlier message while the current step has no answer text
     message("a3", "assistant"),
   ]
   expect(finalAnswer(messages, (id) => parts[id] ?? [])).toEqual({ messageID: "a1", partIDs: ["answer"] })
+})
+
+test("play resumes a paused older message until a newer answer arrives", () => {
+  const older = { sessionID: "s1", messageID: "a1", latest: "a5" }
+  expect(resumes(older, { sessionID: "s1", messageID: "a5" })).toBe(true)
+  expect(resumes(older, { sessionID: "s1", messageID: "a1" })).toBe(true)
+  expect(resumes(older, undefined)).toBe(true)
+  expect(resumes(older, { sessionID: "s1", messageID: "a6" })).toBe(false)
+  expect(resumes(older, { sessionID: "s2", messageID: "a5" })).toBe(false)
 })

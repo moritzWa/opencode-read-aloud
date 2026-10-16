@@ -4,7 +4,7 @@ import type { CodeRenderable, KeyEvent, MarkdownRenderable, Renderable } from "@
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
-import { answerParts, finalAnswer, isAnswerText } from "./answer"
+import { answerParts, finalAnswer, isAnswerText, resumes } from "./answer"
 import { remote } from "./media"
 import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
@@ -61,6 +61,9 @@ type Status = "idle" | "loading" | "playing" | "paused"
 type Reading = {
   sessionID: string
   messageID: string
+  // The latest answer when this reading was opened, so play keeps resuming an older
+  // message until a newer answer arrives.
+  latest?: string
   segments: Segment[]
   script: Script
   clip: Clip
@@ -127,7 +130,7 @@ const tui: TuiPlugin = async (api, options) => {
   async function step() {
     if (current?.playback) return pause()
     const answer = currentAnswer(api)
-    if (current && (!answer || current.messageID === answer.messageID)) return start(current.position - RESUME_REWIND)
+    if (current && resumes(current, answer)) return start(current.position - RESUME_REWIND)
     if (!answer) return api.ui.toast({ variant: "info", message: "No answer to read yet" })
     await open(answer)
   }
@@ -148,6 +151,7 @@ const tui: TuiPlugin = async (api, options) => {
 
   async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
     stop()
+    const latest = currentAnswer(api)?.messageID
     const segments = answer.partIDs.flatMap((partID) =>
       (blocks(viewOf(partID, answer.messageID)) ?? []).map((node, index) => ({
         partID,
@@ -168,6 +172,7 @@ const tui: TuiPlugin = async (api, options) => {
     current = {
       sessionID: answer.sessionID,
       messageID: answer.messageID,
+      latest,
       segments,
       script,
       clip,

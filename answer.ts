@@ -13,6 +13,20 @@ export function finalAnswer(messages: readonly Message[], parts: (messageID: str
     .find((answer) => answer.partIDs.length > 0)
 }
 
+/**
+ * Whether play should resume the paused reading instead of reading the latest answer.
+ * A reading of an older message (picked by clicking it) resumes until a newer answer
+ * arrives; `latest` is the latest answer when the reading was opened.
+ */
+export function resumes(
+  reading: { sessionID: string; messageID: string; latest?: string },
+  answer: { sessionID: string; messageID: string } | undefined,
+) {
+  if (!answer) return true
+  if (reading.sessionID !== answer.sessionID) return false
+  return reading.messageID === answer.messageID || reading.latest === answer.messageID
+}
+
 export function answerParts(parts: readonly Part[]) {
   return parts
     .slice(parts.findLastIndex((part) => part.type === "tool") + 1)

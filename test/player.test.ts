@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
-import { pieces } from "../player"
+import { createServer } from "node:net"
+import { pieces, post } from "../player"
 
 test("splits a long answer into growing pieces that end on sentences and cover it exactly", () => {
   const text = Array.from({ length: 120 }, (_, index) => `Sentence number ${index} says a little more.`).join(" ")
@@ -14,4 +15,21 @@ test("splits a long answer into growing pieces that end on sentences and cover i
 
 test("keeps a short answer in one piece", () => {
   expect(pieces("Done. Tests pass.")).toEqual([{ start: 0, end: 17 }])
+})
+
+test("retries once on a fresh connection when the server dropped the first one", async () => {
+  let connections = 0
+  const server = createServer((socket) => {
+    connections++
+    if (connections === 1) return socket.destroy()
+    socket.end("HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\nok")
+  }).listen(0)
+  const port = (server.address() as { port: number }).port
+  try {
+    const response = await post(`http://127.0.0.1:${port}/`, { method: "POST" })
+    expect(await response.text()).toBe("ok")
+    expect(connections).toBe(2)
+  } finally {
+    server.close()
+  }
 })

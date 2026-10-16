@@ -428,13 +428,19 @@ async function speechify(text: string, key: string, voice: string, model: string
   })
 }
 
-/** fetch that gives up when the response headers take longer than HEADERS_MS. */
-async function post(url: string, init: RequestInit) {
+/**
+ * fetch that gives up when the response headers take longer than HEADERS_MS. The server
+ * closes idle keep-alive connections, and the next request on one fails at once with
+ * "The socket connection was closed unexpectedly"; a retry opens a fresh connection.
+ */
+export async function post(url: string, init: RequestInit, retried = false): Promise<Response> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), HEADERS_MS)
   return fetch(url, { ...init, signal: controller.signal })
     .catch((error: unknown) => {
-      throw controller.signal.aborted ? new Error(`No response from ${new URL(url).host} in ${HEADERS_MS / 1000}s`) : error
+      if (controller.signal.aborted) throw new Error(`No response from ${new URL(url).host} in ${HEADERS_MS / 1000}s`)
+      if (retried || !String((error as Error)?.message).includes("socket connection was closed")) throw error
+      return post(url, init, true)
     })
     .finally(() => clearTimeout(timer))
 }

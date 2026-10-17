@@ -1,8 +1,13 @@
 /** Compatibility boundary for the V2 TUI host. Algorithms keep using the V1
  * facade; all persisted state, event, slot and keymap registrations are native V2.
  * No private host modules or live server/config paths are imported. */
+import { readFileSync } from "node:fs"
+import { homedir } from "node:os"
+import { join } from "node:path"
+
 export function adapt(context) {
   const disposals = []
+  const legacy = legacyKV(context.options)
   const [saved, save] = context.storage.store("v1-options", { initial: {} })
   const route = () => {
     const current = context.ui.router.current()
@@ -60,7 +65,17 @@ export function adapt(context) {
         messages: (sessionID) => messages(sessionID).map((message) => ({ ...message, role: message.type === "assistant" ? "assistant" : "user" })),
       },
     },
-    kv: { get: (key, fallback) => saved[key] ?? fallback, set: (key, value) => void save((draft) => { draft[key] = value }) },
+    kv: {
+      get(key, fallback) {
+        if (saved[key] !== undefined) return saved[key]
+        if (legacy[key] === undefined) return fallback
+        // Persist only preferences this plugin actually reads. Copying the
+        // whole V1 KV blob would import unrelated TUI/session state.
+        void save((draft) => { if (draft[key] === undefined) draft[key] = legacy[key] })
+        return legacy[key]
+      },
+      set: (key, value) => void save((draft) => { draft[key] = value }),
+    },
     theme: { get current() { return theme() } },
     route: {
       get current() { return route() },
@@ -138,6 +153,17 @@ export function adapt(context) {
     },
   }
   return { api, dispose: async () => { for (const dispose of disposals.toReversed()) await dispose() } }
+}
+
+function legacyKV(options) {
+  if (options?.legacyKV && typeof options.legacyKV === "object" && !Array.isArray(options.legacyKV)) return options.legacyKV
+  try {
+    const file = options?.legacyKVPath ?? join(process.env.XDG_STATE_HOME || join(homedir(), ".local/state"), "opencode", "kv.json")
+    const value = JSON.parse(readFileSync(file, "utf8"))
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  } catch {
+    return {}
+  }
 }
 
 export function findNode(node, id) {

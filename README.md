@@ -128,3 +128,9 @@ message identity rather than by text matching.
 Both versions share the exact player, scripts, audio cache, lazy synthesis,
 word/sentence highlighting, Option-click/double-click seeking, older-answer
 pause/resume selection, speed controls, stall recovery and media-key support.
+
+On first use V2 seeds missing preferences such as `speech_speed` from the
+copied V1 `$XDG_STATE_HOME/opencode/kv.json` (or `~/.local/state/opencode/kv.json`).
+Set `legacyKV` to an object or `legacyKVPath` to a seed file to migrate an
+isolated candidate explicitly. Existing V2 preferences win. The adapter writes
+only to V2 plugin storage; the seed file stays read-only.

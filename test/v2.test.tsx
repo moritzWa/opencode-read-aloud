@@ -44,6 +44,7 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
   let disposed = 0
   let mode = "base"
   const context = {
+    options: { legacyKV: { speech_speed: 1.9, unrelated: "do not migrate eagerly" } },
     storage: { store: () => [values, (change: (draft: object) => void) => change(values)] },
     renderer: { root: { id: "root", getChildren: () => [] } },
     data: {
@@ -57,6 +58,9 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
     client: { command: { list: async () => ({ location: {}, data: [{ name: "other-command" }] }) } },
   }
   const bridge = adapt(context)
+  expect(bridge.api.kv.get("speech_speed", 1.7)).toBe(1.9)
+  expect(values.speech_speed).toBe(1.9)
+  expect(values.unrelated).toBeUndefined()
   expect(bridge.api.state.part("msg_fixture").map((part: { id: string }) => part.id)).toEqual(["0", "1", "2"])
   bridge.api.kv.set("speech_speed", 2)
   expect(bridge.api.kv.get("speech_speed", 1.7)).toBe(2)

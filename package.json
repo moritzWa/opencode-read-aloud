@@ -21,10 +21,11 @@
   "exports": {
     "./tui": "./index.tsx",
     "./v2": "./v2.js",
-    "./v2-compat": "./v2-compat.js"
+    "./v2-compat": { "types": "./v2-compat.d.ts", "import": "./v2-compat.js" }
   },
   "files": [
     "index.tsx",
+    "tui.js",
     "answer.ts",
     "player.ts",
     "media.ts",
@@ -33,6 +34,7 @@
     "view.ts",
     "v2.js",
     "v2-compat.js",
+    "v2-compat.d.ts",
     "README.md",
     "LICENSE"
   ],

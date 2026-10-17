@@ -549,4 +549,20 @@ function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-export default { id, tui }
+export default {
+  id,
+  tui,
+  // V2 discovers packages through the same /tui subpath as V1. Keep both
+  // activation contracts on that module so either host resolves it correctly.
+  async setup(context: unknown) {
+    const { adapt } = await import("./v2-compat.js")
+    const bridge = adapt(context)
+    try {
+      await tui(bridge.api, (context as { options: Record<string, unknown> }).options)
+      return bridge.dispose
+    } catch (error) {
+      await bridge.dispose()
+      throw error
+    }
+  },
+}

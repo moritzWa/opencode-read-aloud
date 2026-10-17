@@ -114,8 +114,10 @@ MIT
 
 ## OpenCode V2
 
-The existing `opencode-read-aloud/tui` entrypoint remains compatible with V1.
-V2 loads `opencode-read-aloud/v2`, a native `{ id, setup(context) }` plugin.
+The existing `opencode-read-aloud/tui` entrypoint supports both V1 and V2.
+V2's normal package discovery uses its native `{ id, setup(context) }` contract;
+V1 still uses the same `{ id, tui(api, options) }` contract. The separate
+`opencode-read-aloud/v2` entrypoint is available for explicit file loading.
 Use the same options (including provider, voice, keybinds and `placement`).
 The V2 adapter requires `session.composer.right` and `prompt.footer` host slots,
 real markdown descendants under `message:<messageID>:part:<contentIndex>`, and

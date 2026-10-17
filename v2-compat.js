@@ -10,6 +10,11 @@ export function adapt(context) {
   }
   const messages = (sessionID) => context.data.session.message.list(sessionID)
   const findMessage = (messageID) => {
+    const current = context.ui.router.current()
+    if (current.type === "session") {
+      const message = context.data.session.message.get(current.sessionID, messageID)
+      if (message) return { message, sessionID: current.sessionID }
+    }
     for (const session of context.data.session.list()) {
       const message = context.data.session.message.get(session.id, messageID)
       if (message) return { message, sessionID: session.id }
@@ -67,7 +72,7 @@ export function adapt(context) {
         // events. Listen once to the native stream and preserve session scope.
         const off = context.data.listen(({ details: event }) => {
           const p = event.data ?? event.properties ?? event
-          if (type === "session.idle" && event.type === type) callback({ ...event, properties: p })
+          if (type === "session.idle" && [type, "session.execution.succeeded", "session.execution.failed", "session.execution.interrupted"].includes(event.type)) callback({ type, properties: p })
           if ((type === "message.updated" || type === "message.part.updated") && /^session\.(?:message|text|step|tool|reasoning)\./.test(event.type)) callback({ type, properties: p })
         })
         disposals.push(off)
@@ -80,7 +85,7 @@ export function adapt(context) {
       DialogPrompt: (input) => context.ui.dialog.prompt(input),
       DialogConfirm: (input) => context.ui.dialog.confirm(input),
       DialogSelect: (input) => context.ui.dialog.select(input),
-      dialog: { get open() { return context.keymap.mode.current() === "dialog" } },
+      dialog: { get open() { return ["dialog", "modal"].includes(context.keymap.mode.current()) } },
     },
     keymap: {
       registerLayer(layer) {
@@ -122,7 +127,10 @@ export function adapt(context) {
       },
     },
     client: {
-      command: { list: async () => ({ data: await context.client.command.list({ location: context.location }) }) },
+      command: { list: async () => {
+        const result = await context.client.command.list({ location: context.location })
+        return { data: result.data ?? result }
+      } },
       session: {
         create: async () => ({ data: await context.client.session.create({ location: context.location }) }),
         command: async (input) => context.client.session.command({ sessionID: input.sessionID, name: input.command, text: input.arguments ?? "" }),

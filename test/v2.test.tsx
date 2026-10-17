@@ -42,6 +42,7 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
   const listeners: Array<(input: any) => void> = []
   const values: Record<string, unknown> = {}
   let disposed = 0
+  let mode = "base"
   const context = {
     storage: { store: () => [values, (change: (draft: object) => void) => change(values)] },
     renderer: { root: { id: "root", getChildren: () => [] } },
@@ -51,8 +52,9 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
         get: () => ({ type: "assistant", content: [{ type: "reasoning", text: "r" }, { type: "tool", name: "bash" }, { type: "text", text: "answer" }] }),
       } },
     },
-    keymap: { layer: (factory: () => object) => layers.push(factory()), mode: { current: () => "base" } },
+    keymap: { layer: (factory: () => object) => layers.push(factory()), mode: { current: () => mode } },
     ui: { slot: (claim: object) => { registrations.push(claim); return () => disposed++ }, router: { current: () => ({ type: "session", sessionID: "ses_fixture" }) } },
+    client: { command: { list: async () => ({ location: {}, data: [{ name: "other-command" }] }) } },
   }
   const bridge = adapt(context)
   expect(bridge.api.state.part("msg_fixture").map((part: { id: string }) => part.id)).toEqual(["0", "1", "2"])
@@ -68,6 +70,13 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
   bridge.api.event.on("message.updated", (event: { properties: { sessionID: string } }) => { updated = event.properties.sessionID })
   listeners[0]({ details: { type: "session.text.delta", data: { sessionID: "ses_fixture" } } })
   expect(updated).toBe("ses_fixture")
+  let idle = ""
+  bridge.api.event.on("session.idle", (event: { properties: { sessionID: string } }) => { idle = event.properties.sessionID })
+  listeners[1]({ details: { type: "session.execution.succeeded", data: { sessionID: "ses_fixture" } } })
+  expect(idle).toBe("ses_fixture")
+  expect((await bridge.api.client.command.list()).data).toEqual([{ name: "other-command" }])
+  mode = "modal"
+  expect(bridge.api.ui.dialog.open).toBe(true)
   await bridge.dispose()
-  expect(disposed).toBe(3)
+  expect(disposed).toBe(4)
 })

@@ -111,6 +111,11 @@ const tui: TuiPlugin = async (api, options) => {
 
   /** The rendered markdown of a text part, found by its content since the host does not label it. */
   function viewOf(partID: string, messageID: string) {
+    const rendered = api as TuiPluginApi & { renderedPart?: (messageID: string, partID: string) => Renderable | undefined }
+    if (rendered.renderedPart) {
+      const root = rendered.renderedPart(messageID, partID)
+      return root && markdowns(root)[0]
+    }
     const part = api.state.part(messageID).find((part) => part.id === partID)
     if (!part || part.type !== "text") return
     const text = part.text.trim()
@@ -318,7 +323,8 @@ const tui: TuiPlugin = async (api, options) => {
       }
     }
     for (const view of views) {
-      const owner = parts.get(view.content)
+      const rendered = api as TuiPluginApi & { renderedOwner?: (node: Renderable) => { partID: string; messageID: string } | undefined }
+      const owner = rendered.renderedOwner ? rendered.renderedOwner(view) : parts.get(view.content)
       if (!owner) continue
       adopted.set(view, owner)
       view.onMouseUp = (event) => {

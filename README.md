@@ -111,3 +111,18 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 ## License
 
 MIT
+
+## OpenCode V2
+
+The existing `opencode-read-aloud/tui` entrypoint remains compatible with V1.
+V2 loads `opencode-read-aloud/v2`, a native `{ id, setup(context) }` plugin.
+Use the same options (including provider, voice, keybinds and `placement`).
+The V2 adapter requires `session.composer.right` and `prompt.footer` host slots,
+real markdown descendants under `message:<messageID>:part:<contentIndex>`, and
+the scrollbox `session:<sessionID>:transcript`. Part IDs are string content
+indices, including non-text content. Duplicate answer text is resolved by
+message identity rather than by text matching.
+
+Both versions share the exact player, scripts, audio cache, lazy synthesis,
+word/sentence highlighting, Option-click/double-click seeking, older-answer
+pause/resume selection, speed controls, stall recovery and media-key support.

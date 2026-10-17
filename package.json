@@ -19,16 +19,22 @@
     "tui"
   ],
   "exports": {
-    "./tui": "./index.tsx"
+    "./tui": "./index.tsx",
+    "./v2": "./v2.js",
+    "./v2-compat": { "types": "./v2-compat.d.ts", "import": "./v2-compat.js" }
   },
   "files": [
     "index.tsx",
+    "tui.js",
     "answer.ts",
     "player.ts",
     "media.ts",
     "nowplaying.swift",
     "script.ts",
     "view.ts",
+    "v2.js",
+    "v2-compat.js",
+    "v2-compat.d.ts",
     "README.md",
     "LICENSE"
   ],
@@ -58,5 +64,11 @@
   },
   "engines": {
     "opencode": ">=1.18.27"
+  },
+  "peerDependencies": {
+    "@opentui/core": ">=0.4.5",
+    "@opentui/keymap": ">=0.4.5",
+    "@opentui/solid": ">=0.4.5",
+    "solid-js": ">=1.9.10"
   }
 }

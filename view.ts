@@ -31,7 +31,9 @@ function isCode(node: unknown): node is CodeRenderable {
 
 // The transcript is the only scrollbox that sticks to the bottom.
 function isTranscript(node: any) {
-  return typeof node?.scrollBy === "function" && node.stickyScroll === true && node.stickyStart === "bottom"
+  return typeof node?.scrollBy === "function" &&
+    ((typeof node.id === "string" && /^session:.*:transcript$/.test(node.id)) ||
+      (node.stickyScroll === true && node.stickyStart === "bottom"))
 }
 
 export function transcript(root: Renderable): (Renderable & { scrollBy(delta: number): void }) | undefined {

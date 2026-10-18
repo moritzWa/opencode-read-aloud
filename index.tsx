@@ -111,6 +111,11 @@ const tui: TuiPlugin = async (api, options) => {
 
   /** The rendered markdown of a text part, found by its content since the host does not label it. */
   function viewOf(partID: string, messageID: string) {
+    const rendered = api as TuiPluginApi & { renderedPart?: (messageID: string, partID: string) => Renderable | undefined }
+    if (rendered.renderedPart) {
+      const root = rendered.renderedPart(messageID, partID)
+      return root && markdowns(root)[0]
+    }
     const part = api.state.part(messageID).find((part) => part.id === partID)
     if (!part || part.type !== "text") return
     const text = part.text.trim()
@@ -318,7 +323,8 @@ const tui: TuiPlugin = async (api, options) => {
       }
     }
     for (const view of views) {
-      const owner = parts.get(view.content)
+      const rendered = api as TuiPluginApi & { renderedOwner?: (node: Renderable) => { partID: string; messageID: string } | undefined }
+      const owner = rendered.renderedOwner ? rendered.renderedOwner(view) : parts.get(view.content)
       if (!owner) continue
       adopted.set(view, owner)
       view.onMouseUp = (event) => {
@@ -543,4 +549,20 @@ function record(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === "object" && !Array.isArray(value)
 }
 
-export default { id, tui }
+export default {
+  id,
+  tui,
+  // V2 discovers packages through the same /tui subpath as V1. Keep both
+  // activation contracts on that module so either host resolves it correctly.
+  async setup(context: unknown) {
+    const { adapt } = await import("./v2-compat.js")
+    const bridge = adapt(context)
+    try {
+      await tui(bridge.api, (context as { options: Record<string, unknown> }).options)
+      return bridge.dispose
+    } catch (error) {
+      await bridge.dispose()
+      throw error
+    }
+  },
+}

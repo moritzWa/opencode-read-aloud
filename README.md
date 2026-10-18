@@ -129,6 +129,11 @@ Both versions share the exact player, scripts, audio cache, lazy synthesis,
 word/sentence highlighting, Option-click/double-click seeking, older-answer
 pause/resume selection, speed controls, stall recovery and media-key support.
 
+Compiled V2 clients require the host's [shared-runtime fix](https://github.com/moritzWa/opencode/commit/50aa00b881281b4cfc7048e84d3ddef4a9370099)
+(migration integration `8806e2cdf3`). It keeps Solid owners and OpenTUI runtime
+identity shared across local wrappers and npm entrypoints. Physical dependency
+versions need not match when the host supplies its canonical runtime.
+
 On first use V2 seeds missing preferences such as `speech_speed` from the
 copied V1 `$XDG_STATE_HOME/opencode/kv.json` (or `~/.local/state/opencode/kv.json`).
 Set `legacyKV` to an object or `legacyKVPath` to a seed file to migrate an

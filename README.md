@@ -86,6 +86,7 @@ OpenCode loads the TypeScript source directly, so there is nothing to build.
 | ----------- | --------- | -------------------------------------------------------------------------- |
 | `keybinds`  | see below | Keys for the commands. `"none"` or `false` unbinds one.                    |
 | `placement` | `"right"` | `"right"` puts the controls on the prompt row (`session_prompt_right`). `"footer"` uses a `session_prompt_footer` slot, for OpenCode builds that have one. |
+| `highlight` | Theme-derived | Optional hex background colors for `sentence` and `word`, independent of the theme's action text. For a light blue/lavender reading highlight: `{ "sentence": "#e2e2ff", "word": "#adadff" }`. Works in V1 and V2. |
 | `speechify` | none | `{ "voice", "model" }` for Speechify. Overrides `SPEECHIFY_VOICE_ID` and `SPEECHIFY_MODEL_ID`. |
 | `elevenlabs` | none | `{ "voice", "model" }` for ElevenLabs. Overrides `ELEVENLABS_VOICE_ID` and `ELEVENLABS_MODEL_ID`. |
 

@@ -90,8 +90,16 @@ test("finds the markdown view and highlights the current sentence and word", asy
     expect(painted(sentenceColor)).toContain("There are no")
     expect(painted(sentenceColor)).not.toContain("likely")
 
+    // Explicit speech colors must not inherit a neutral V2 action-text color.
+    const lavender = { background: RGBA.fromHex("#ffffff"), primary: RGBA.fromHex("#111111"),
+      sentence: RGBA.fromHex("#e2e2ff"), word: RGBA.fromHex("#adadff") }
+    show(nodes[target.segment], source(script, sentence), target, lavender)
+    expect(await settle(() => painted(lavender.word).includes("tests"))).toBe(true)
+    expect(painted(lavender.word).trim()).toBe("tests")
+    expect(painted(lavender.sentence)).toContain("There are no")
+
     clear()
-    expect(await settle(() => !painted(wordColor).includes("tests"))).toBe(true)
+    expect(await settle(() => !painted(lavender.word).includes("tests"))).toBe(true)
   } finally {
     await Bun.sleep(50)
     setup.renderer.destroy()

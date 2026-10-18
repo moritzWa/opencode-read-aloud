@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
-import type { CodeRenderable, KeyEvent, MarkdownRenderable, Renderable } from "@opentui/core"
+import { RGBA, type CodeRenderable, type KeyEvent, type MarkdownRenderable, type Renderable } from "@opentui/core"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
@@ -107,7 +107,10 @@ const tui: TuiPlugin = async (api, options) => {
     api.ui.toast({ variant: "error", message })
   }
 
-  const colors = () => ({ background: api.theme.current.background, primary: api.theme.current.primary })
+  const highlight = record(opts.highlight) ? opts.highlight : {}
+  const sentence = typeof highlight.sentence === "string" ? RGBA.fromHex(highlight.sentence) : undefined
+  const word = typeof highlight.word === "string" ? RGBA.fromHex(highlight.word) : undefined
+  const colors = () => ({ background: api.theme.current.background, primary: api.theme.current.primary, sentence, word })
 
   /** The rendered markdown of a text part, found by its content since the host does not label it. */
   function viewOf(partID: string, messageID: string) {

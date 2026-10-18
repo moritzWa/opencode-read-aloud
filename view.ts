@@ -2,7 +2,7 @@ import { RGBA, type CodeRenderable, type MarkdownRenderable, type MouseEvent, ty
 
 export type Range = { start: number; end: number }
 export type Spot = { partID: string; messageID: string; node: CodeRenderable; offset: number }
-export type Colors = { background: RGBA; primary: RGBA }
+export type Colors = { background: RGBA; primary: RGBA; sentence?: RGBA; word?: RGBA }
 
 // Tables are skipped by request. Code, html and rules have nothing to say.
 const SKIP = new Set(["code", "table", "hr", "html", "space", "def"])
@@ -179,10 +179,12 @@ export function tint(base: RGBA, overlay: RGBA, alpha: number): RGBA {
 function register(node: CodeRenderable, colors: Colors) {
   const style = node.syntaxStyle
   if (!style) return
-  const key = `${colors.background.toInts()}|${colors.primary.toInts()}`
+  const sentence = colors.sentence ?? tint(colors.background, colors.primary, 0.12)
+  const word = colors.word ?? tint(colors.background, colors.primary, 0.4)
+  const key = `${sentence.toInts()}|${word.toInts()}`
   if (styled.get(style) === key) return
-  style.registerStyle(SENTENCE, { bg: tint(colors.background, colors.primary, 0.12) })
-  style.registerStyle(WORD, { bg: tint(colors.background, colors.primary, 0.4) })
+  style.registerStyle(SENTENCE, { bg: sentence })
+  style.registerStyle(WORD, { bg: word })
   style.clearCache()
   styled.set(style, key)
 }

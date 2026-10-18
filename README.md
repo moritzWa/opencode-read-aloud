@@ -130,6 +130,11 @@ Both versions share the exact player, scripts, audio cache, lazy synthesis,
 word/sentence highlighting, Option-click/double-click seeking, older-answer
 pause/resume selection, speed controls, stall recovery and media-key support.
 
+For double-click-to-read without copying text on selection, set
+`"terminal": { "copy": "manual" }` in V2's `cli.json`. Drag selection and
+explicit copy shortcuts still work. The plugin clears only the selection
+consumed by a speech gesture; an ordinary drag does not start reading.
+
 Compiled V2 clients require the host's [shared-runtime fix](https://github.com/moritzWa/opencode/commit/50aa00b881281b4cfc7048e84d3ddef4a9370099)
 (migration integration `8806e2cdf3`). It keeps Solid owners and OpenTUI runtime
 identity shared across local wrappers and npm entrypoints. Physical dependency

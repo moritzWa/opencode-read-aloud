@@ -153,15 +153,24 @@ test("picks a word on option+click or double-click, never on a single click or d
     expect(picks).toEqual([])
 
     await Bun.sleep(450)
+    setup.renderer.clearSelection()
     await setup.mockMouse.doubleClick(x, y)
     expect(picks).toEqual(["ikely"])
+    expect(setup.renderer.getSelection()).toBeNull()
 
     await setup.mockMouse.click(x, y, undefined, { modifiers: { alt: true } })
     expect(picks).toEqual(["ikely", "ikely"])
 
     await Bun.sleep(450)
     await setup.mockMouse.drag(x - 4, y, x + 3, y)
+    expect(setup.renderer.getSelection()?.getSelectedText().length).toBeGreaterThan(1)
     await setup.mockMouse.click(x + 3, y)
+    expect(picks).toEqual(["ikely", "ikely"])
+
+    await Bun.sleep(450)
+    setup.renderer.clearSelection()
+    await setup.mockMouse.click(x, y, 2)
+    await setup.mockMouse.click(x, y, 2)
     expect(picks).toEqual(["ikely", "ikely"])
   } finally {
     await Bun.sleep(50)

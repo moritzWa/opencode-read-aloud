@@ -102,20 +102,26 @@ export function reveal(root: Renderable, node: Renderable) {
 // in time and place. opentui marks every release on text as isDragging (a press
 // starts a selection), so a drag is told apart by whether it selected anything.
 const DOUBLE_MS = 400
-let lastClick: { x: number; y: number; at: number } | undefined
+let lastClick: { x: number; y: number; at: number; target: Renderable | null } | undefined
 
 function doubleClick(event: MouseEvent) {
-  if (selected(event) || event.modifiers.shift || event.modifiers.ctrl || event.modifiers.alt) {
+  const selection = event.target?.ctx.getSelection()
+  // V2's renderer selects the word on the second press, before this release
+  // handler runs. That stationary word selection is not a drag.
+  const word = selection && "behavior" in selection && selection.behavior === "word" &&
+    selection.anchor.x === selection.focus.x && selection.anchor.y === selection.focus.y
+  if ((!word && selected(event)) || event.modifiers.shift || event.modifiers.ctrl || event.modifiers.alt) {
     lastClick = undefined
     return false
   }
   const now = Date.now()
   const hit =
     lastClick !== undefined &&
+    lastClick.target === event.target &&
     now - lastClick.at <= DOUBLE_MS &&
     Math.abs(event.x - lastClick.x) <= 1 &&
     event.y === lastClick.y
-  lastClick = hit ? undefined : { x: event.x, y: event.y, at: now }
+  lastClick = hit ? undefined : { x: event.x, y: event.y, at: now, target: event.target }
   return hit
 }
 
@@ -130,11 +136,13 @@ function selected(event: MouseEvent) {
  * when you Option+click into a background window, and terminals never report Cmd.
  */
 export function pick(view: MarkdownRenderable, partID: string, messageID: string, event: MouseEvent): Spot | undefined {
+  if (event.button !== 0) return
   if (!event.modifiers.alt && !doubleClick(event)) return
   const node = blocks(view)?.find((node) => node === event.target)
   if (!node) return
   const offset = offsetAt(node, event.x, event.y)
   if (offset === undefined) return
+  view.ctx.clearSelection()
   event.stopPropagation()
   return { partID, messageID, node, offset }
 }

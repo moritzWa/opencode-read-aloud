@@ -292,7 +292,9 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
       "-i",
       "pipe:0",
       "-af",
-      `atempo=${rate}`,
+      // After a seek atempo can emit a first frame of a few samples, which the flac encoder
+      // refuses as a block size, so ffmpeg writes nothing; fixed-size frames avoid that.
+      `atempo=${rate},asetnsamples=n=4096:p=1`,
       "-f",
       "flac",
       "pipe:1",

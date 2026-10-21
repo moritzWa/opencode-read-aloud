@@ -36,12 +36,28 @@ const LINES = /(?<=\.[A-Za-z][A-Za-z0-9]{0,7})(?::\d+(?:[-–:]\d+)*|#L\d+(?:-L?
 // dates like 10/09/2026 survive.
 const PATH = /(?<![\w.~/-])(?:~|\.{1,2})?\/?(?:[\w.@-]+\/){2,}[\w.@-]*/g
 
+// Arrows are read as "to", so "client -> server" is not "client dash greater than server".
+const ARROW = /[ \t]*(?:-{1,2}>|={1,2}>|[→⟶⇒])[ \t]*/g
+// In a code-block diagram each line is its own item; a leading bullet or arrow is dropped.
+const MARKER = /^[ \t]*(?:[-*•>]|-{1,2}>|={1,2}>|[→⟶⇒])[ \t]+/gm
+const MARKER_OR_INDENT = /^[ \t]*(?:(?:[-*•>]|-{1,2}>|={1,2}>|[→⟶⇒])[ \t]+)?/gm
+// Source code rather than a list: a line that opens or closes a block, ends a
+// statement, or is a shell prompt.
+const CODE_LINE = /[{};]\s*$|^\s*[}\])]|^\s*\$ /
+
 const HEADING = /^#{1,6}\s+/
 const BOX = /[\u2500-\u259F]/g
 const SYMBOL = /[-|+/\\_=<>*#.:^~[\]()]/g
 const TERMINAL = /[.!?:;]$/
 
-export function build(segments: readonly string[]): Script {
+/**
+ * A block to speak. Prose is a paragraph, heading, or list item's raw markdown.
+ * Code and table blocks are read line by line, each line its own sentence; a code
+ * block is only read when it is a simple list diagram.
+ */
+export type Piece = { kind: "prose" | "code" | "table"; text: string }
+
+export function build(segments: readonly (string | Piece)[]): Script {
   const chars: string[] = []
   const segment: number[] = []
   const offset: number[] = []
@@ -51,8 +67,11 @@ export function build(segments: readonly string[]): Script {
     offset.push(at)
   }
 
-  segments.forEach((raw, seg) => {
-    if (diagram(raw)) return
+  segments.forEach((piece, seg) => {
+    const kind = typeof piece === "string" ? "prose" : piece.kind
+    const raw = typeof piece === "string" ? piece : piece.text
+    if (kind === "prose" ? diagram(raw) : kind === "code" && !simple(raw)) return
+    const lines = kind !== "prose"
     const before = chars.length
     const head = raw.match(HEADING)?.[0].length ?? 0
     const ids = new Uint8Array(raw.length)
@@ -67,8 +86,31 @@ export function build(segments: readonly string[]): Script {
       ids.fill(1, match.index, match.index + trimmed.lastIndexOf("/") + 1)
       ids.fill(1, match.index + trimmed.length, match.index + match[0].length)
     }
+    if (lines)
+      for (const match of raw.matchAll(MARKER_OR_INDENT)) ids.fill(1, match.index, match.index + match[0].length)
+    const arrows = new Map<number, number>()
+    for (const match of raw.matchAll(ARROW)) if (!ids[match.index]) arrows.set(match.index, match[0].length)
+    // Ends the line before a newline with a period so the voice pauses between items.
+    const stop = (at: number) => {
+      while (chars.length > before && chars[chars.length - 1] === " ") {
+        chars.pop()
+        segment.pop()
+        offset.pop()
+      }
+      if (chars.length > before && !TERMINAL.test(chars[chars.length - 1])) emit(".", seg, at)
+    }
     const copy = (from: number, to: number) => {
-      for (let i = from; i < to; i++) if (!ids[i]) emit(/\s/.test(raw[i]) ? " " : raw[i], seg, i)
+      for (let i = from; i < to; i++) {
+        if (ids[i]) continue
+        const arrow = arrows.get(i)
+        if (arrow) {
+          for (const char of " to ") emit(char, seg, i)
+          i += arrow - 1
+          continue
+        }
+        if (lines && raw[i] === "\n") stop(i)
+        emit(/\s/.test(raw[i]) ? " " : raw[i], seg, i)
+      }
     }
     let last = head
     for (const match of raw.slice(head).matchAll(INLINE)) {
@@ -148,6 +190,41 @@ export function diagram(raw: string) {
     return visible > 0 && (line.match(SYMBOL)?.length ?? 0) / visible > 0.4
   })
   return dense.length / lines.length >= 0.5
+}
+
+/**
+ * A code block worth reading: a short list or flow, one item per line, such as
+ * "-> step\n  1 first\n  2 second". Box art, symbol-heavy lines, columns lined up
+ * with runs of spaces, and source code are not.
+ */
+export function simple(raw: string) {
+  const lines = raw.split("\n").filter((line) => line.trim())
+  if (!lines.length || lines.length > 15 || diagram(raw)) return false
+  return lines.every((line) => {
+    if (CODE_LINE.test(line) || /\S {3,}\S/.test(line.trim())) return false
+    const body = line.replace(MARKER, "").replace(ARROW, " ").replace(/\s/g, "")
+    return (body.match(SYMBOL)?.length ?? 0) <= body.length * 0.4
+  })
+}
+
+/**
+ * A markdown table as lines to read, or undefined when it is too big to follow by
+ * ear. Two columns read as "key: value"; wider ones name each value by its header.
+ */
+export function tableText(header: readonly string[], rows: readonly (readonly string[])[]) {
+  if (header.length > 5 || rows.length > 20) return
+  const clean = (cell: string) => cell.trim().replace(/[.:;,]+$/, "")
+  const line = (cells: readonly string[], names?: readonly string[]) => {
+    const [first, ...rest] = cells.map(clean)
+    const values = rest.flatMap((cell, index) => {
+      if (!cell) return []
+      const name = names && clean(names[index + 1] ?? "")
+      return [name ? `${name} ${cell}` : cell]
+    })
+    return [first, values.join("; ")].filter(Boolean).join(": ")
+  }
+  if (header.length > 2) return rows.map((row) => line(row, header)).join("\n")
+  return [header, ...rows].map((row) => line(row)).join("\n")
 }
 
 function sentences(text: string, segment: number[], words: Range[]) {

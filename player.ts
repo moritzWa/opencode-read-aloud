@@ -302,10 +302,11 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
   )
   children.add(proc)
+  const stderr = new Response(proc.stderr).text()
   void proc.exited.then(async (code) => {
     children.delete(proc)
     // A kill is how every stop ends it; only ffmpeg's own failures are worth a line.
-    if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await new Response(proc.stderr).text()).slice(-500) })
+    if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await stderr).slice(-500) })
   })
   const fed = { bytes: 0 }
   void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
@@ -322,8 +323,11 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     throw new Wedged("The audio output did not start playing")
   }
   if (!stream) {
+    // The decoder fails when ffmpeg wrote nothing usable, so its stderr says why.
+    const errors = await Promise.race([stderr, Bun.sleep(500).then(() => "")])
     proc.kill("SIGKILL")
-    throw new Error("No audio output device")
+    if (errors) log("ffmpeg-stderr", { from: Number(from.toFixed(2)), stderr: errors.slice(-500) })
+    throw new Wedged("The audio did not start playing")
   }
   log("play", { from: Number(from.toFixed(2)), rate })
   const position = () => {

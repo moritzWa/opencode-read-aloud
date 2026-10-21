@@ -1,9 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 import { expect, test } from "bun:test"
-import { RGBA, SyntaxStyle, type MarkdownRenderable } from "@opentui/core"
+import { RGBA, SyntaxStyle, type CodeRenderable, type MarkdownRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import { build, source } from "../script"
-import { blocks, clear, markdowns, offsetAt, pick, show, tint } from "../view"
+import { blocks, clear, highlightable, markdowns, offsetAt, pick, show, tint } from "../view"
 
 const colors = { background: RGBA.fromHex("#0a0a0a"), primary: RGBA.fromHex("#fab283") }
 
@@ -66,14 +66,17 @@ test("finds the markdown view and highlights the current sentence and word", asy
     await setup.renderOnce()
     expect(await settle(() => setup.captureCharFrame().includes("likely bug"))).toBe(true)
     expect(markdowns(setup.renderer.root)).toEqual([view()])
-    const nodes = blocks(view())!
-    expect(nodes.map((node) => node.content)).toEqual([
-      "## Summary",
-      "I found the **likely bug** in `router.ts`. There are no tests for it.",
-      "first item",
-      "second item",
-      "Final paragraph here.",
+    const all = blocks(view())!
+    expect(all.map((block) => [block.kind, block.text])).toEqual([
+      ["prose", "## Summary"],
+      ["prose", "I found the **likely bug** in `router.ts`. There are no tests for it."],
+      ["prose", "first item"],
+      ["prose", "second item"],
+      ["table", "a: b\n1: 2"],
+      ["prose", "Final paragraph here."],
     ])
+    const nodes = all.flatMap((block) => (highlightable(block.node) ? [block.node] : []))
+    expect(nodes).toHaveLength(5)
 
     const script = build(nodes.map((node) => node.content))
     const word = script.words.findIndex((w) => script.text.slice(w.start, w.end) === "tests")
@@ -118,7 +121,8 @@ test("maps a clicked cell to its offset in the block's raw markdown", async () =
     const at = (word: string) => {
       const y = frame.findIndex((row) => new RegExp(`\\b${word}\\b`).test(row))
       const x = frame[y].search(new RegExp(`\\b${word}\\b`)) + 1
-      const node = blocks(view())!.find((node) => y >= node.y && y < node.y + node.height)!
+      const node = blocks(view())!.find((block) => y >= block.node.y && y < block.node.y + block.node.height)!
+        .node as CodeRenderable
       const offset = offsetAt(node, x, y)!
       return node.content.slice(offset, offset + word.length - 1)
     }
@@ -127,6 +131,25 @@ test("maps a clicked cell to its offset in the block's raw markdown", async () =
     expect(at("there")).toBe("here")
     expect(at("shame")).toBe("hame")
     expect(at("item")).toBe("tem")
+  } finally {
+    await Bun.sleep(50)
+    setup.renderer.destroy()
+  }
+}, 20000)
+
+test("reads plain and text fences and the table, not code in a language", async () => {
+  const { setup, settle, view } = await render(
+    "Steps:\n\n```\n-> deploy\n  1 build\n  2 push\n```\n\n```ts\nconst x = 1\n```\n\n```text\nA -> B\n```\n\n| Operation | What we must specify |\n| - | - |\n| `veeva.listTasks` | Connection, assignees |\n\nDone.",
+    70,
+    30,
+  )
+  try {
+    await settle(() => setup.captureCharFrame().includes("Done"))
+    const all = blocks(view())!
+    expect(all.map((block) => block.kind)).toEqual(["prose", "code", "code", "table", "prose"])
+    expect(build(all).text).toBe(
+      "Steps: deploy. 1 build. 2 push. A to B. Operation: What we must specify. veeva.listTasks: Connection, assignees. Done.",
+    )
   } finally {
     await Bun.sleep(50)
     setup.renderer.destroy()

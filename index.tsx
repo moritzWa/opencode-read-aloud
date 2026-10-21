@@ -1,6 +1,6 @@
 /** @jsxImportSource @opentui/solid */
 import type { TuiPlugin, TuiPluginApi } from "@opencode-ai/plugin/tui"
-import { RGBA, type CodeRenderable, type KeyEvent, type MarkdownRenderable, type Renderable } from "@opentui/core"
+import { RGBA, type KeyEvent, type MarkdownRenderable, type Renderable } from "@opentui/core"
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
@@ -8,7 +8,7 @@ import { answerParts, finalAnswer, isAnswerText, resumes } from "./answer"
 import { remote } from "./media"
 import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
-import { blocks, clear, markdowns, pick, reveal, show, transcript, type Spot } from "./view"
+import { blocks, clear, highlightable, markdowns, pick, reveal, show, transcript, type Block, type Spot } from "./view"
 
 const id = "opencode-read-aloud"
 
@@ -54,7 +54,7 @@ const RESUME_REWIND = 0.4
 // history in one batch before any event arrives, so they are also swept for.
 const SWEEP_MS = 2000
 
-type Segment = { partID: string; messageID: string; index: number; node: CodeRenderable }
+type Segment = Block & { partID: string; messageID: string; index: number }
 
 type Status = "idle" | "loading" | "playing" | "paused"
 
@@ -69,7 +69,7 @@ type Reading = {
   clip: Clip
   position: number
   word: number
-  node?: CodeRenderable
+  node?: Renderable
   playback?: Playback
   timer?: ReturnType<typeof setInterval>
   // The output gets a fresh engine on its first two stalls; a third ends the reading.
@@ -161,14 +161,14 @@ const tui: TuiPlugin = async (api, options) => {
     stop()
     const latest = currentAnswer(api)?.messageID
     const segments = answer.partIDs.flatMap((partID) =>
-      (blocks(viewOf(partID, answer.messageID)) ?? []).map((node, index) => ({
+      (blocks(viewOf(partID, answer.messageID)) ?? []).map((block, index) => ({
+        ...block,
         partID,
         messageID: answer.messageID,
         index,
-        node,
       })),
     )
-    const script = build(segments.map((segment) => segment.node.content))
+    const script = build(segments)
     if (!script.text) return api.ui.toast({ variant: "info", message: "Nothing to read in this answer" })
     setSessionID(answer.sessionID)
     setStatus("loading")
@@ -294,7 +294,8 @@ const tui: TuiPlugin = async (api, options) => {
     const target = source(reading.script, word)
     const node = resolve(reading.segments[target.segment])
     if (!node) return
-    show(node, source(reading.script, sentence), target, colors())
+    if (highlightable(node)) show(node, source(reading.script, sentence), target, colors())
+    else clear()
     if (reading.node === node) return
     reading.node = node
     reveal(api.renderer.root, node)
@@ -304,7 +305,7 @@ const tui: TuiPlugin = async (api, options) => {
   function resolve(segment: Segment | undefined) {
     if (!segment) return
     if (!segment.node.isDestroyed) return segment.node
-    const node = blocks(viewOf(segment.partID, segment.messageID))?.[segment.index]
+    const node = blocks(viewOf(segment.partID, segment.messageID))?.[segment.index]?.node
     if (node) segment.node = node
     return node
   }
@@ -519,7 +520,7 @@ function answerAt(api: TuiPluginApi, spot: Spot) {
 }
 
 /** Start time of the first spoken word at or after the picked spot, waiting for it to stream in. */
-async function timeAt(reading: Reading, spot: Spot, resolve: (segment: Segment) => CodeRenderable | undefined) {
+async function timeAt(reading: Reading, spot: Spot, resolve: (segment: Segment) => Renderable | undefined) {
   const segment = reading.segments.findIndex(
     (segment) => segment.partID === spot.partID && resolve(segment) === spot.node,
   )

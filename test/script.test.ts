@@ -1,5 +1,49 @@
 import { expect, test } from "bun:test"
-import { build, diagram, source, wordAt } from "../script"
+import { build, diagram, simple, source, tableText, wordAt } from "../script"
+
+test("reads a simple list diagram line by line and skips complex ones", () => {
+  const list = "-> blabla\n  1 bla1\n  2 bla2"
+  expect(simple(list)).toBe(true)
+  const script = build([{ kind: "code", text: list }])
+  expect(script.text).toBe("blabla. 1 bla1. 2 bla2.")
+  expect(script.sentences).toHaveLength(3)
+  const one = source(script, script.words[1])
+  expect(list.slice(one.start, one.end)).toBe("1")
+  expect(one.start).toBe(list.indexOf("1 bla1"))
+  expect(build([{ kind: "code", text: "request -> server --> db\n- cache hit" }]).text).toBe(
+    "request to server to db. cache hit.",
+  )
+
+  expect(simple("┌────┐\n│ box │\n└────┘")).toBe(false)
+  expect(simple("client      server\n  |           |\n  |---req---->|")).toBe(false)
+  expect(simple("name    status\nfoo     ok")).toBe(false)
+  expect(simple("function x() {\n  return 1;\n}")).toBe(false)
+  expect(simple("$ bun test")).toBe(false)
+  expect(simple(Array.from({ length: 16 }, (_, i) => `${i} step`).join("\n"))).toBe(false)
+  expect(build(["Before.", { kind: "code", text: "a {\n}" }, "After."]).text).toBe("Before. After.")
+})
+
+test("reads arrows in prose as 'to'", () => {
+  expect(build(["cmd+s -> resume, then a => b"]).text).toBe("cmd+s to resume, then a to b.")
+})
+
+test("reads tables row by row", () => {
+  const two = tableText(
+    ["Operation", "What we must specify"],
+    [
+      ["`veeva.listTasks`", "Connection, assignees, status/due-date filters; supported combinations"],
+      ["Pagination", "Page-size limits, continuation token."],
+    ],
+  )!
+  expect(build([{ kind: "table", text: two }]).text).toBe(
+    "Operation: What we must specify. veeva.listTasks: Connection, assignees, status/due-date filters; supported combinations. Pagination: Page-size limits, continuation token.",
+  )
+  expect(tableText(["Plan", "Cost", "Speed"], [["Starter", "$10", "fast"], ["Pro", "", "faster"]])).toBe(
+    "Starter: Cost $10; Speed fast\nPro: Speed faster",
+  )
+  expect(tableText(["a", "b", "c", "d", "e", "f"], [])).toBeUndefined()
+  expect(tableText(["a", "b"], Array.from({ length: 21 }, () => ["x", "y"]))).toBeUndefined()
+})
 
 test("speaks prose without markdown markers and maps back to raw offsets", () => {
   const raw = "I found the **likely bug** in `router.ts`."

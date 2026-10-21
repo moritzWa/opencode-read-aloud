@@ -4,7 +4,7 @@ import { SyntaxStyle } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import { adapt, findNode } from "../v2-compat.js"
 import { blocks, markdowns, show, clear, transcript } from "../view"
-import { RGBA } from "@opentui/core"
+import { RGBA, type CodeRenderable, type Renderable } from "@opentui/core"
 
 test("V2 stable content indices distinguish identical answers and preserve real highlight nodes", async () => {
   const output = await testRender(() => (
@@ -24,11 +24,12 @@ test("V2 stable content indices distinguish identical answers and preserve real 
       await Bun.sleep(10)
       await output.renderOnce()
     }
-    const word = blocks(markdowns(next)[0])![0]
-    const original = blocks(markdowns(old)[0])![0].onHighlight
+    const prose = (root: Renderable) => blocks(markdowns(root)[0])![0].node as CodeRenderable
+    const word = prose(next)
+    const original = prose(old).onHighlight
     show(word, { start: 0, end: 18 }, { start: 5, end: 11 }, { background: RGBA.fromHex("#000000"), primary: RGBA.fromHex("#ff0000") })
     expect(word.onHighlight).toBeFunction()
-    expect(blocks(markdowns(old)[0])![0].onHighlight).toBe(original)
+    expect(prose(old).onHighlight).toBe(original)
     expect(transcript(output.renderer.root)?.id).toBe("session:ses_fixture:transcript")
   } finally {
     clear()

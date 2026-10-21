@@ -1,11 +1,14 @@
 import { RGBA, type CodeRenderable, type MarkdownRenderable, type MouseEvent, type Renderable } from "@opentui/core"
+import { tableText, type Piece } from "./script"
 
 export type Range = { start: number; end: number }
 export type Spot = { partID: string; messageID: string; node: CodeRenderable; offset: number }
 export type Colors = { background: RGBA; primary: RGBA; sentence?: RGBA; word?: RGBA }
 
-// Tables are skipped by request. Code, html and rules have nothing to say.
-const SKIP = new Set(["code", "table", "hr", "html", "space", "def"])
+// Html and rules have nothing to say.
+const SKIP = new Set(["hr", "html", "space", "def"])
+// Fences that can hold a diagram rather than source code.
+const PLAIN = /^(?:text|txt|plain|plaintext)?$/i
 const SENTENCE = "speech.sentence"
 const WORD = "speech.word"
 
@@ -27,6 +30,12 @@ function isMarkdown(node: unknown): node is MarkdownRenderable {
 function isCode(node: unknown): node is CodeRenderable {
   const value = node as CodeRenderable | undefined
   return typeof value?.content === "string" && typeof value?.filetype === "string"
+}
+
+// A fence without a language renders as a CodeRenderable with no filetype.
+function hasText(node: unknown): node is CodeRenderable {
+  const value = node as CodeRenderable | undefined
+  return typeof value?.content === "string" && value.lineInfo !== undefined
 }
 
 // The transcript is the only scrollbox that sticks to the bottom.
@@ -56,14 +65,37 @@ export function markdowns(root: Renderable, found: MarkdownRenderable[] = []) {
   return found
 }
 
+export type Block = Piece & { node: Renderable }
+
 /**
- * The prose blocks of a rendered text part in reading order. Markdown renders each
+ * The readable blocks of a rendered text part in reading order. Markdown renders each
  * paragraph, heading, and list item as a markdown-filetype CodeRenderable whose
- * content is that block's raw markdown; fenced code renders with its own filetype.
+ * content is that block's raw markdown; fenced code renders with its own filetype,
+ * and a table as one TextTableRenderable. Code in a programming language is left out.
  */
-export function blocks(view: MarkdownRenderable | undefined) {
+export function blocks(view: MarkdownRenderable | undefined): Block[] | undefined {
   if (!view || view.isDestroyed) return
-  return view._blockStates.flatMap((block) => (SKIP.has(block.token.type) ? [] : prose(block.renderable)))
+  return view._blockStates.flatMap((block): Block[] => {
+    const token = block.token
+    if (SKIP.has(token.type)) return []
+    if (token.type === "code") {
+      if (!PLAIN.test(token.lang?.trim() ?? "") || !hasText(block.renderable)) return []
+      return [{ kind: "code", text: block.renderable.content, node: block.renderable }]
+    }
+    if (token.type === "table") {
+      const text = tableText(
+        token.header.map((cell) => cell.text),
+        token.rows.map((row) => row.map((cell) => cell.text)),
+      )
+      return text ? [{ kind: "table", text, node: block.renderable }] : []
+    }
+    return prose(block.renderable).map((node) => ({ kind: "prose", text: node.content, node }))
+  })
+}
+
+/** Whether a block can show the spoken word; code and tables are only scrolled to. */
+export function highlightable(node: Renderable): node is CodeRenderable {
+  return isCode(node) && node.filetype === "markdown"
 }
 
 export function show(node: CodeRenderable, sentence: Range, word: Range, colors: Colors) {
@@ -138,8 +170,8 @@ function selected(event: MouseEvent) {
 export function pick(view: MarkdownRenderable, partID: string, messageID: string, event: MouseEvent): Spot | undefined {
   if (event.button !== 0) return
   if (!event.modifiers.alt && !doubleClick(event)) return
-  const node = blocks(view)?.find((node) => node === event.target)
-  if (!node) return
+  const node = blocks(view)?.find((block) => block.node === event.target)?.node
+  if (!node || !hasText(node)) return
   const offset = offsetAt(node, event.x, event.y)
   if (offset === undefined) return
   view.ctx.clearSelection()

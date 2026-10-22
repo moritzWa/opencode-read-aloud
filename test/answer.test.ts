@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import type { Message, Part } from "@opencode-ai/sdk/v2"
-import { finalAnswer, resumes } from "../answer"
+import { finalAnswer, inReading, resumes } from "../answer"
 
 const message = (id: string, role: "user" | "assistant") => ({ id, role }) as Message
 const text = (id: string, value: string, synthetic?: boolean) => ({ id, type: "text", text: value, synthetic }) as Part
@@ -44,4 +44,11 @@ test("play resumes a paused older message until a newer answer arrives", () => {
   expect(resumes(older, undefined)).toBe(true)
   expect(resumes(older, { sessionID: "s1", messageID: "a6" })).toBe(false)
   expect(resumes(older, { sessionID: "s2", messageID: "a5" })).toBe(false)
+})
+
+test("a click on another message is not in the open reading even when the part index matches", () => {
+  // V2 numbers parts per message, so two answers commonly both have text at part 1.
+  const segments = [{ messageID: "a1", partID: "1" }]
+  expect(inReading(segments, { messageID: "a1", partID: "1" })).toBe(true)
+  expect(inReading(segments, { messageID: "a2", partID: "1" })).toBe(false)
 })

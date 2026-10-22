@@ -35,12 +35,19 @@ test("reads tables row by row", () => {
       ["Pagination", "Page-size limits, continuation token."],
     ],
   )!
-  expect(build([{ kind: "table", text: two }]).text).toBe(
+  expect(build([{ kind: "table", text: two.text }]).text).toBe(
     "Operation: What we must specify. veeva.listTasks: Connection, assignees, status/due-date filters; supported combinations. Pagination: Page-size limits, continuation token.",
   )
-  expect(tableText(["Plan", "Cost", "Speed"], [["Starter", "$10", "fast"], ["Pro", "", "faster"]])).toBe(
-    "Starter: Cost $10; Speed fast\nPro: Speed faster",
-  )
+  // Every spoken character of a cell points back into that cell's raw markdown.
+  const at = two.text.indexOf("Page-size")
+  expect(two.cells[at]).toEqual({ row: 2, col: 1, at: 0 })
+  expect(two.cells[two.text.indexOf("listTasks")]).toEqual({ row: 1, col: 0, at: "`veeva.".length })
+  expect(two.cells[two.text.indexOf(": Connection")]).toBeUndefined()
+
+  const wide = tableText(["Plan", "Cost", "Speed"], [["Starter", " $10", "fast"], ["Pro", "", "faster"]])!
+  expect(wide.text).toBe("Starter: Cost $10; Speed fast\nPro: Speed faster")
+  expect(wide.cells[wide.text.indexOf("Cost")]).toBeUndefined()
+  expect(wide.cells[wide.text.indexOf("$10")]).toEqual({ row: 1, col: 1, at: 1 })
   expect(tableText(["a", "b", "c", "d", "e", "f"], [])).toBeUndefined()
   expect(tableText(["a", "b"], Array.from({ length: 21 }, () => ["x", "y"]))).toBeUndefined()
 })

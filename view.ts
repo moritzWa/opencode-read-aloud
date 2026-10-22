@@ -1,5 +1,16 @@
-import { RGBA, type CodeRenderable, type MarkdownRenderable, type MouseEvent, type Renderable } from "@opentui/core"
-import { tableText, type Piece } from "./script"
+import {
+  RGBA,
+  type CodeRenderable,
+  type MarkdownRenderable,
+  type MouseEvent,
+  type Renderable,
+  type SyntaxStyle,
+  type TextBuffer,
+  type TextChunk,
+  type TextTableContent,
+  type TextTableRenderable,
+} from "@opentui/core"
+import { tableText, type Piece, type TableText } from "./script"
 
 export type Range = { start: number; end: number }
 export type Spot = { partID: string; messageID: string; node: CodeRenderable; offset: number }
@@ -12,7 +23,20 @@ const PLAIN = /^(?:text|txt|plain|plaintext)?$/i
 const SENTENCE = "speech.sentence"
 const WORD = "speech.word"
 
-let lit: { node: CodeRenderable; base: CodeRenderable["onHighlight"] } | undefined
+// Tags this plugin's ranges in a code block's text buffer.
+const REF = 0x5e7c
+
+// The block showing the spoken word, with what it takes to undo: the prose block's
+// own highlight pass, the code block's buffer, or the table's chunks.
+let lit:
+  | {
+      node: Renderable
+      base?: CodeRenderable["onHighlight"]
+      buffer?: TextBuffer
+      original?: TextTableContent
+      shown?: TextTableContent
+    }
+  | undefined
 // Which style table got which colors, so a theme change re-registers them.
 const styled = new WeakMap<object, string>()
 
@@ -36,6 +60,11 @@ function isCode(node: unknown): node is CodeRenderable {
 function hasText(node: unknown): node is CodeRenderable {
   const value = node as CodeRenderable | undefined
   return typeof value?.content === "string" && value.lineInfo !== undefined
+}
+
+function isTable(node: unknown): node is TextTableRenderable {
+  const value = node as TextTableRenderable | undefined
+  return Array.isArray(value?.content) && "columnWidthMode" in (value as object)
 }
 
 // The transcript is the only scrollbox that sticks to the bottom.
@@ -65,7 +94,7 @@ export function markdowns(root: Renderable, found: MarkdownRenderable[] = []) {
   return found
 }
 
-export type Block = Piece & { node: Renderable }
+export type Block = Piece & { node: Renderable; table?: TableText }
 
 /**
  * The readable blocks of a rendered text part in reading order. Markdown renders each
@@ -83,42 +112,130 @@ export function blocks(view: MarkdownRenderable | undefined): Block[] | undefine
       return [{ kind: "code", text: block.renderable.content, node: block.renderable }]
     }
     if (token.type === "table") {
-      const text = tableText(
+      const table = tableText(
         token.header.map((cell) => cell.text),
         token.rows.map((row) => row.map((cell) => cell.text)),
       )
-      return text ? [{ kind: "table", text, node: block.renderable }] : []
+      if (!table || !isTable(block.renderable)) return []
+      return [{ kind: "table", text: table.text, table, node: block.renderable }]
     }
     return prose(block.renderable).map((node) => ({ kind: "prose", text: node.content, node }))
   })
 }
 
-/** Whether a block can show the spoken word; code and tables are only scrolled to. */
-export function highlightable(node: Renderable): node is CodeRenderable {
-  return isCode(node) && node.filetype === "markdown"
-}
-
-export function show(node: CodeRenderable, sentence: Range, word: Range, colors: Colors) {
-  if (lit?.node !== node) {
-    clear()
-    lit = { node, base: node.onHighlight }
+/**
+ * Highlights the sentence and word being spoken. Prose goes through the block's
+ * highlight pass. A code fence without a language has no highlight pass, so the
+ * ranges go straight into its text buffer. A table is drawn from styled chunks
+ * per cell, so the cells the ranges cover are redrawn with a background.
+ */
+export function show(node: Renderable, sentence: Range, word: Range, colors: Colors, table?: TableText) {
+  if (lit?.node !== node) clear()
+  if (isTable(node)) {
+    if (!table) return
+    const original = lit?.node === node && lit.original ? lit.original : node.content
+    const shown = paint(original, table, palette(colors), sentence, word)
+    node.content = shown
+    lit = { node, original, shown }
+    return
   }
-  register(node, colors)
-  const base = lit.base
-  node.onHighlight = async (highlights, context) => [
-    ...((await base?.(highlights, context)) ?? highlights),
-    [sentence.start, sentence.end, SENTENCE],
-    [word.start, word.end, WORD],
-  ]
+  if (!hasText(node)) return
+  if (node.filetype === "markdown") {
+    register(node.syntaxStyle, colors)
+    const base = lit?.node === node ? lit.base : node.onHighlight
+    lit = { node, base }
+    node.onHighlight = async (highlights, context) => [
+      ...((await base?.(highlights, context)) ?? highlights),
+      [sentence.start, sentence.end, SENTENCE],
+      [word.start, word.end, WORD],
+    ]
+    node.requestRender()
+    return
+  }
+  // The buffer resolves style ids against its own style table, not the block's.
+  const inner = node as unknown as { textBuffer: TextBuffer; _textBufferSyntaxStyle: SyntaxStyle }
+  const buffer = inner.textBuffer
+  const style = inner._textBufferSyntaxStyle
+  register(style, colors)
+  buffer.removeHighlightsByRef(REF)
+  // Buffer offsets do not count line breaks.
+  const at = (offset: number) => offset - (node.content.slice(0, offset).match(/\n/g)?.length ?? 0)
+  for (const [range, name] of [[sentence, SENTENCE], [word, WORD]] as const) {
+    const styleId = style.getStyleId(name)
+    if (styleId !== null)
+      buffer.addHighlightByCharRange({ start: at(range.start), end: at(range.end), styleId, priority: 100, hlRef: REF })
+  }
+  lit = { node, buffer }
   node.requestRender()
 }
 
 export function clear() {
-  if (lit && !lit.node.isDestroyed) {
-    lit.node.onHighlight = lit.base
-    lit.node.requestRender()
-  }
+  const current = lit
   lit = undefined
+  if (!current || current.node.isDestroyed) return
+  if (current.buffer) current.buffer.removeHighlightsByRef(REF)
+  else if (current.original && isTable(current.node)) {
+    // Markdown may have rebuilt the table since; then there is nothing of ours left.
+    if (current.node.content === current.shown) current.node.content = current.original
+  } else if (isCode(current.node)) current.node.onHighlight = current.base
+  current.node.requestRender()
+}
+
+/** The table's chunks with the cells under `sentence` and `word` given a background. */
+function paint(content: TextTableContent, table: TableText, colors: { sentence: RGBA; word: RGBA }, sentence: Range, word: Range) {
+  const spans = new Map<string, { start: number; end: number; bg: RGBA }[]>()
+  for (const [range, bg] of [[sentence, colors.sentence], [word, colors.word]] as const) {
+    const hit = new Map<string, { start: number; end: number }>()
+    for (let i = range.start; i < range.end; i++) {
+      const cell = table.cells[i]
+      if (!cell) continue
+      const key = `${cell.row}:${cell.col}`
+      const span = hit.get(key)
+      hit.set(key, { start: Math.min(span?.start ?? cell.at, cell.at), end: Math.max(span?.end ?? 0, cell.at + 1) })
+    }
+    for (const [key, span] of hit) spans.set(key, [...(spans.get(key) ?? []), { ...span, bg }])
+  }
+  return content.map((row, r) =>
+    row.map((chunks, c) => {
+      const marks = spans.get(`${r}:${c}`)
+      if (!chunks || !marks) return chunks
+      const plain = chunks.map((chunk) => chunk.text).join("")
+      const raw = table.raw[r]?.[c] ?? ""
+      const at = marks.map((mark) => ({ start: align(raw, plain, mark.start), end: align(raw, plain, mark.end), bg: mark.bg }))
+      return recolor(chunks, at)
+    }),
+  )
+}
+
+/** Splits chunks at the mark edges; a later mark wins where two overlap. */
+function recolor(chunks: TextChunk[], marks: { start: number; end: number; bg: RGBA }[]) {
+  let offset = 0
+  return chunks.flatMap((chunk) => {
+    const from = offset
+    offset += chunk.text.length
+    const edges = [...new Set([from, offset, ...marks.flatMap((mark) => [mark.start, mark.end])])]
+      .filter((edge) => edge >= from && edge <= offset)
+      .sort((a, b) => a - b)
+    return edges.slice(1).flatMap((end, index) => {
+      const start = edges[index]
+      if (end <= start) return []
+      const bg = marks.findLast((mark) => mark.start <= start && end <= mark.end)?.bg
+      return [{ ...chunk, text: chunk.text.slice(start - from, end - from), ...(bg ? { bg } : {}) }]
+    })
+  })
+}
+
+/** The rendered-cell offset of a raw-markdown offset: walk both, skipping concealed markers. */
+function align(raw: string, plain: string, rawAt: number) {
+  let at = 0
+  let index = 0
+  while (at < rawAt && at < raw.length) {
+    if (raw[at] === plain[index]) {
+      at++
+      index++
+    } else at++
+  }
+  return Math.min(index, plain.length)
 }
 
 /** Scrolls the transcript just enough to bring `node` on screen. */
@@ -216,17 +333,22 @@ export function tint(base: RGBA, overlay: RGBA, alpha: number): RGBA {
 
 // The host's theme has no speech styles, so they go into whatever style table
 // the block renders with, tinted the way the built-in version was.
-function register(node: CodeRenderable, colors: Colors) {
-  const style = node.syntaxStyle
+function register(style: SyntaxStyle | undefined, colors: Colors) {
   if (!style) return
-  const sentence = colors.sentence ?? tint(colors.background, colors.primary, 0.12)
-  const word = colors.word ?? tint(colors.background, colors.primary, 0.4)
+  const { sentence, word } = palette(colors)
   const key = `${sentence.toInts()}|${word.toInts()}`
   if (styled.get(style) === key) return
   style.registerStyle(SENTENCE, { bg: sentence })
   style.registerStyle(WORD, { bg: word })
   style.clearCache()
   styled.set(style, key)
+}
+
+function palette(colors: Colors) {
+  return {
+    sentence: colors.sentence ?? tint(colors.background, colors.primary, 0.12),
+    word: colors.word ?? tint(colors.background, colors.primary, 0.4),
+  }
 }
 
 function prose(node: Renderable): CodeRenderable[] {

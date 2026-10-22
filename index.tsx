@@ -8,7 +8,7 @@ import { answerParts, finalAnswer, isAnswerText, resumes } from "./answer"
 import { remote } from "./media"
 import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
-import { blocks, clear, highlightable, markdowns, pick, reveal, show, transcript, type Block, type Spot } from "./view"
+import { blocks, clear, markdowns, pick, reveal, show, transcript, type Block, type Spot } from "./view"
 
 const id = "opencode-read-aloud"
 
@@ -292,10 +292,10 @@ const tui: TuiPlugin = async (api, options) => {
     const sentence =
       reading.script.sentences.find((range) => range.start <= word.start && word.end <= range.end) ?? word
     const target = source(reading.script, word)
-    const node = resolve(reading.segments[target.segment])
+    const segment = reading.segments[target.segment]
+    const node = resolve(segment)
     if (!node) return
-    if (highlightable(node)) show(node, source(reading.script, sentence), target, colors())
-    else clear()
+    show(node, source(reading.script, sentence), target, colors(), segment.table)
     if (reading.node === node) return
     reading.node = node
     reveal(api.renderer.root, node)

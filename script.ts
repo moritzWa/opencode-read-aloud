@@ -207,24 +207,46 @@ export function simple(raw: string) {
   })
 }
 
+/** Where a spoken table character came from: a row (the header is row 0), a column, and an offset into that cell's raw markdown. */
+export type TableCell = { row: number; col: number; at: number }
+export type TableText = { text: string; cells: (TableCell | undefined)[]; raw: string[][] }
+
 /**
  * A markdown table as lines to read, or undefined when it is too big to follow by
  * ear. Two columns read as "key: value"; wider ones name each value by its header.
+ * `cells` maps every character of `text` back to its cell, so the spoken word can
+ * be shown in the table; the separators and header names added for wide tables map nowhere.
  */
-export function tableText(header: readonly string[], rows: readonly (readonly string[])[]) {
+export function tableText(header: readonly string[], rows: readonly (readonly string[])[]): TableText | undefined {
   if (header.length > 5 || rows.length > 20) return
-  const clean = (cell: string) => cell.trim().replace(/[.:;,]+$/, "")
-  const line = (cells: readonly string[], names?: readonly string[]) => {
-    const [first, ...rest] = cells.map(clean)
-    const values = rest.flatMap((cell, index) => {
-      if (!cell) return []
-      const name = names && clean(names[index + 1] ?? "")
-      return [name ? `${name} ${cell}` : cell]
-    })
-    return [first, values.join("; ")].filter(Boolean).join(": ")
+  const raw = [header, ...rows].map((row) => [...row])
+  const cells: (TableCell | undefined)[] = []
+  let text = ""
+  const put = (value: string, from?: TableCell) => {
+    for (let k = 0; k < value.length; k++) cells.push(from && { ...from, at: from.at + k })
+    text += value
   }
-  if (header.length > 2) return rows.map((row) => line(row, header)).join("\n")
-  return [header, ...rows].map((row) => line(row)).join("\n")
+  const cell = (row: number, col: number) => {
+    const value = raw[row][col] ?? ""
+    return { body: value.trim().replace(/[.:;,]+$/, ""), at: value.length - value.trimStart().length }
+  }
+  const wide = header.length > 2
+  const order = wide ? rows.map((_, index) => index + 1) : raw.map((_, index) => index)
+  order.forEach((row, n) => {
+    if (n) put("\n")
+    const first = cell(row, 0)
+    const values = raw[row].map((_, col) => col).filter((col) => col > 0 && cell(row, col).body)
+    if (first.body) put(first.body, { row, col: 0, at: first.at })
+    if (first.body && values.length) put(": ")
+    values.forEach((col, index) => {
+      if (index) put("; ")
+      const name = wide ? cell(0, col).body : ""
+      if (name) put(`${name} `)
+      const value = cell(row, col)
+      put(value.body, { row, col, at: value.at })
+    })
+  })
+  return { text, cells, raw }
 }
 
 function sentences(text: string, segment: number[], words: Range[]) {

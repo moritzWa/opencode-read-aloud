@@ -27,6 +27,17 @@ export function resumes(
   return reading.messageID === answer.messageID || reading.latest === answer.messageID
 }
 
+/**
+ * Whether a clicked part belongs to the open reading. V2 part ids are indices within
+ * their message, so the part id alone matches the same index in other messages.
+ */
+export function inReading(
+  segments: readonly { messageID: string; partID: string }[],
+  spot: { messageID: string; partID: string },
+) {
+  return segments.some((segment) => segment.messageID === spot.messageID && segment.partID === spot.partID)
+}
+
 export function answerParts(parts: readonly Part[]) {
   return parts
     .slice(parts.findLastIndex((part) => part.type === "tool") + 1)

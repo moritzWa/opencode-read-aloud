@@ -4,7 +4,7 @@ import { RGBA, type KeyEvent, type MarkdownRenderable, type Renderable } from "@
 import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
-import { answerParts, finalAnswer, isAnswerText, resumes } from "./answer"
+import { answerParts, finalAnswer, inReading, isAnswerText, resumes } from "./answer"
 import { remote } from "./media"
 import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
@@ -145,7 +145,7 @@ const tui: TuiPlugin = async (api, options) => {
 
   async function jump(spot: Spot) {
     const reading = current
-    if (!reading?.segments.some((segment) => segment.partID === spot.partID)) {
+    if (!reading || !inReading(reading.segments, spot)) {
       const answer = answerAt(api, spot)
       return answer && open(answer, spot)
     }

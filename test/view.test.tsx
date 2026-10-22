@@ -3,7 +3,7 @@ import { expect, test } from "bun:test"
 import { RGBA, SyntaxStyle, type CodeRenderable, type MarkdownRenderable } from "@opentui/core"
 import { testRender } from "@opentui/solid"
 import { build, source } from "../script"
-import { blocks, clear, highlightable, markdowns, offsetAt, pick, show, tint } from "../view"
+import { blocks, clear, markdowns, offsetAt, pick, show, tint } from "../view"
 
 const colors = { background: RGBA.fromHex("#0a0a0a"), primary: RGBA.fromHex("#fab283") }
 
@@ -46,11 +46,6 @@ async function render(text: string, width: number, height: number) {
     }
     return ok()
   }
-  return { setup, settle, view: () => view! }
-}
-
-test("finds the markdown view and highlights the current sentence and word", async () => {
-  const { setup, settle, view } = await render(content, 70, 20)
   const painted = (rgb: RGBA) =>
     setup
       .captureSpans()
@@ -61,6 +56,11 @@ test("finds the markdown view and highlights the current sentence and word", asy
       })
       .map((span) => span.text)
       .join("")
+  return { setup, settle, painted, view: () => view! }
+}
+
+test("finds the markdown view and highlights the current sentence and word", async () => {
+  const { setup, settle, painted, view } = await render(content, 70, 20)
 
   try {
     await setup.renderOnce()
@@ -75,7 +75,7 @@ test("finds the markdown view and highlights the current sentence and word", asy
       ["table", "a: b\n1: 2"],
       ["prose", "Final paragraph here."],
     ])
-    const nodes = all.flatMap((block) => (highlightable(block.node) ? [block.node] : []))
+    const nodes = all.flatMap((block) => (block.kind === "prose" ? [block.node as CodeRenderable] : []))
     expect(nodes).toHaveLength(5)
 
     const script = build(nodes.map((node) => node.content))
@@ -138,7 +138,7 @@ test("maps a clicked cell to its offset in the block's raw markdown", async () =
 }, 20000)
 
 test("reads plain and text fences and the table, not code in a language", async () => {
-  const { setup, settle, view } = await render(
+  const { setup, settle, painted, view } = await render(
     "Steps:\n\n```\n-> deploy\n  1 build\n  2 push\n```\n\n```ts\nconst x = 1\n```\n\n```text\nA -> B\n```\n\n| Operation | What we must specify |\n| - | - |\n| `veeva.listTasks` | Connection, assignees |\n\nDone.",
     70,
     30,
@@ -147,9 +147,38 @@ test("reads plain and text fences and the table, not code in a language", async 
     await settle(() => setup.captureCharFrame().includes("Done"))
     const all = blocks(view())!
     expect(all.map((block) => block.kind)).toEqual(["prose", "code", "code", "table", "prose"])
-    expect(build(all).text).toBe(
+    const script = build(all)
+    expect(script.text).toBe(
       "Steps: deploy. 1 build. 2 push. A to B. Operation: What we must specify. veeva.listTasks: Connection, assignees. Done.",
     )
+    const wordColor = tint(colors.background, colors.primary, 0.4)
+    const sentenceColor = tint(colors.background, colors.primary, 0.12)
+    const speak = (text: string) => {
+      const word = script.words.find((w) => script.text.slice(w.start, w.end).replace(/[.:,]$/, "") === text)!
+      const sentence = script.sentences.find((s) => s.start <= word.start && word.end <= s.end)!
+      const target = source(script, word)
+      const block = all[target.segment]
+      show(block.node, source(script, sentence), target, colors, block.table)
+    }
+
+    speak("build")
+    expect(await settle(() => painted(wordColor).includes("build"))).toBe(true)
+    expect(painted(wordColor).trim()).toBe("build")
+    expect(painted(sentenceColor)).not.toContain("push")
+
+    speak("veeva.listTasks")
+    expect(await settle(() => painted(wordColor).includes("veeva.listTasks"))).toBe(true)
+    expect(painted(wordColor)).not.toContain("build")
+    expect(painted(wordColor).trim()).toBe("veeva.listTasks")
+    expect(painted(sentenceColor)).toContain("Connection, assignees")
+    expect(painted(sentenceColor)).not.toContain("Operation")
+
+    speak("assignees")
+    expect(await settle(() => painted(wordColor).trim() === "assignees")).toBe(true)
+
+    clear()
+    expect(await settle(() => !painted(wordColor) && !painted(sentenceColor))).toBe(true)
+    expect(setup.captureCharFrame()).toContain("veeva.listTasks")
   } finally {
     await Bun.sleep(50)
     setup.renderer.destroy()

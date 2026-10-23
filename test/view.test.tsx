@@ -185,6 +185,46 @@ test("reads plain and text fences and the table, not code in a language", async 
   }
 }, 20000)
 
+test("double-clicking a table cell starts at that cell's text", async () => {
+  const { setup, settle, view } = await render(
+    "Intro.\n\n| Name | Role | Team |\n| - | - | - |\n| Ada | **Lead** engineer | Core |\n| Bob | Designer | |\n\nDone.",
+    60,
+    16,
+  )
+  try {
+    await settle(() => setup.captureCharFrame().includes("Designer"))
+    const table = blocks(view())!.find((block) => block.kind === "table")!
+    const picks: string[] = []
+    view().onMouseUp = (event) => {
+      const spot = pick(view(), "part", "message", event)
+      if (spot) picks.push(spot.node === table.node ? table.table!.text.slice(spot.offset) : "prose")
+    }
+    const frame = setup.captureCharFrame().split("\n")
+    const click = async (word: string, shift = 0) => {
+      const y = frame.findIndex((row) => row.includes(word))
+      await Bun.sleep(450)
+      setup.renderer.clearSelection()
+      await setup.mockMouse.doubleClick(frame[y].indexOf(word) + shift, y)
+    }
+    expect(table.table!.text).toBe("Ada: Role **Lead** engineer; Team Core\nBob: Role Designer")
+    await click("engineer", 2)
+    await click("Lead")
+    await click("Bob")
+    await click("Name")
+    await click("Designer", 4)
+    expect(picks).toEqual([
+      "gineer; Team Core\nBob: Role Designer",
+      "**Lead** engineer; Team Core\nBob: Role Designer",
+      "Bob: Role Designer",
+      "Ada: Role **Lead** engineer; Team Core\nBob: Role Designer",
+      "gner",
+    ])
+  } finally {
+    await Bun.sleep(50)
+    setup.renderer.destroy()
+  }
+}, 20000)
+
 test("picks a word on option+click or double-click, never on a single click or drag", async () => {
   const { setup, settle, view } = await render("I found the likely bug here.", 40, 6)
   try {
@@ -192,7 +232,7 @@ test("picks a word on option+click or double-click, never on a single click or d
     const picks: string[] = []
     view().onMouseUp = (event) => {
       const spot = pick(view(), "part", "message", event)
-      if (spot) picks.push(spot.node.content.slice(spot.offset, spot.offset + 5))
+      if (spot) picks.push((spot.node as CodeRenderable).content.slice(spot.offset, spot.offset + 5))
     }
     const frame = setup.captureCharFrame().split("\n")
     const y = frame.findIndex((row) => row.includes("likely"))

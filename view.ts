@@ -13,7 +13,7 @@ import {
 import { tableText, type Piece, type TableText } from "./script"
 
 export type Range = { start: number; end: number }
-export type Spot = { partID: string; messageID: string; node: CodeRenderable; offset: number }
+export type Spot = { partID: string; messageID: string; node: Renderable; offset: number }
 export type Colors = { background: RGBA; primary: RGBA; sentence?: RGBA; word?: RGBA }
 
 // Html and rules have nothing to say.
@@ -287,26 +287,72 @@ function selected(event: MouseEvent) {
 export function pick(view: MarkdownRenderable, partID: string, messageID: string, event: MouseEvent): Spot | undefined {
   if (event.button !== 0) return
   if (!event.modifiers.alt && !doubleClick(event)) return
-  const node = blocks(view)?.find((block) => block.node === event.target)?.node
-  if (!node || !hasText(node)) return
-  const offset = offsetAt(node, event.x, event.y)
+  const block = blocks(view)?.find((block) => block.node === event.target)
+  if (!block) return
+  const node = block.node
+  const offset = block.table && isTable(node)
+    ? cellOffset(node, block.table, event.x, event.y)
+    : hasText(node) ? offsetAt(node, event.x, event.y) : undefined
   if (offset === undefined) return
   view.ctx.clearSelection()
   event.stopPropagation()
   return { partID, messageID, node, offset }
 }
 
-/**
- * Screen cell to raw-markdown offset. The rendered text is the raw markdown with
- * concealed markers removed, plus a space before a shown link URL, so walking
- * both in step and skipping whatever does not match lines them up.
- */
+/** Screen cell to raw-markdown offset in a prose or code block. */
 export function offsetAt(node: CodeRenderable, x: number, y: number) {
   const info = node.lineInfo
   const line = y - node.y
   if (line < 0 || line >= info.lineStartCols.length) return
   const column = info.lineStartCols[line] + Math.max(0, Math.min(x - node.x, info.lineWidthCols[line] - 1))
-  const plain = node.plainText
+  return rawAt(node.content, node.plainText, column)
+}
+
+// What the host's table keeps private: its layout and each cell's wrapped text.
+type TableInternals = {
+  ensureLayoutReady(): void
+  getCellAtLocalPosition(x: number, y: number): { rowIdx: number; colIdx: number } | null
+  _layout: { columnOffsets: number[]; rowOffsets: number[] }
+  _cellPaddingX: number
+  _cellPaddingY: number
+  _cells: { textBufferView: { lineInfo: CodeRenderable["lineInfo"] } }[][]
+}
+
+/**
+ * Screen cell in a table to an offset into the spoken table text: the first
+ * spoken character at or after the click in reading order. A header or a cell
+ * that is not read starts at the next one that is.
+ */
+export function cellOffset(node: TextTableRenderable, table: TableText, x: number, y: number) {
+  const inner = node as unknown as TableInternals
+  inner.ensureLayoutReady()
+  const hit = inner.getCellAtLocalPosition(x - node.x, y - node.y)
+  if (!hit) return
+  const row = hit.rowIdx
+  const col = hit.colIdx
+  const left = x - node.x - (inner._layout.columnOffsets[col] ?? 0) - 1 - inner._cellPaddingX
+  const line = y - node.y - (inner._layout.rowOffsets[row] ?? 0) - 1 - inner._cellPaddingY
+  const info = inner._cells[row]?.[col]?.textBufferView.lineInfo
+  const column = info && line >= 0 && line < info.lineStartCols.length
+    ? info.lineStartCols[line] + Math.max(0, Math.min(left, info.lineWidthCols[line] - 1))
+    : Math.max(0, left)
+  const plain = node.content[row]?.[col]?.map((chunk) => chunk.text).join("") ?? ""
+  const at = rawAt(table.raw[row]?.[col] ?? "", plain, column)
+  const after = table.cells.findIndex(
+    (cell) => cell !== undefined && (cell.row > row || (cell.row === row && (cell.col > col || (cell.col === col && cell.at >= at)))),
+  )
+  // Past the end of the cell's text (or on punctuation it drops) means its last word.
+  const own = table.cells.findLastIndex((cell) => cell?.row === row && cell.col === col)
+  if (own >= 0 && (after < 0 || table.cells[after]?.row !== row || table.cells[after]?.col !== col)) return own
+  return after < 0 ? undefined : after
+}
+
+/**
+ * Rendered column to raw-markdown offset. The rendered text is the raw markdown
+ * with concealed markers removed, plus a space before a shown link URL, so walking
+ * both in step and skipping whatever does not match lines them up.
+ */
+function rawAt(raw: string, plain: string, column: number) {
   let index = 0
   let width = 0
   for (const char of plain) {
@@ -314,7 +360,6 @@ export function offsetAt(node: CodeRenderable, x: number, y: number) {
     if (width > column) break
     index += char.length
   }
-  const raw = node.content
   let at = 0
   for (let i = 0; i < index && at < raw.length; ) {
     if (raw[at] === plain[i]) {

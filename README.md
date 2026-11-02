@@ -11,6 +11,7 @@ The same 20 seconds with sound: [assets/demo.mp4](assets/demo.mp4).
 - **Double-click** or **Option+click** (alt+click) any word of an answer to start reading from that word. This works for older answers too. Double-click avoids a macOS quirk: Option+clicking into a background window hides the app you came from. Cmd+click cannot work, terminals never report Cmd.
 - The controls on the prompt row are clickable: play/pause, slower `-`, faster `+`, and stop. On terminals narrower than 80 columns only play/pause and the speed are shown.
 - Speed changes keep the pitch and are remembered between sessions. The default is 1.7x.
+- Inside Agent View, starting playback pauses a voice call first, including double-click, Option+click and playback controls. Standalone OpenCode is unchanged.
 - On macOS the AirPods button and the keyboard's play/pause key pause and resume reading while it is active, instead of starting your music. This needs the Xcode command line tools (`xcode-select --install`), which compile a small helper on first use. Once reading stops, the keys go back to your music app.
 - Speech is synthesized a few sentences ahead of playback, so stopping after the first sentence only pays for the first sentence or two.
 - Audio is cached, so replaying an answer or jumping around in it costs nothing after the first read.

@@ -5,6 +5,7 @@ import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, inReading, isAnswerText, resumes } from "./answer"
+import { notifyReadAloud } from "./agentview"
 import { remote } from "./media"
 import { configure, load, log, play, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
@@ -200,6 +201,7 @@ const tui: TuiPlugin = async (api, options) => {
     if (!reading) return
     held = false
     starting = true
+    notifyReadAloud()
     const playback = await play(reading.clip, Math.max(0, from), rate())
       .catch(fail)
       .finally(() => (starting = false))

@@ -27,6 +27,7 @@
     "index.tsx",
     "tui.js",
     "answer.ts",
+    "agentview.ts",
     "player.ts",
     "media.ts",
     "nowplaying.swift",

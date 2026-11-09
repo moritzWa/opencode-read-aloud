@@ -438,17 +438,134 @@ async function speechify(text: string, key: string, voice: string, model: string
  * fetch that gives up when the response headers take longer than HEADERS_MS. The server
  * closes idle keep-alive connections, and the next request on one fails at once with
  * "The socket connection was closed unexpectedly"; a retry opens a fresh connection.
+ *
+ * A long-running Bun process on macOS can also stick its dns_sd client after sleep or a
+ * Tailscale change and then answer every name with getaddrinfo ENOTFOUND, while a new
+ * process resolves the same name. Pinning the request to an address from another resolver
+ * skips that client.
  */
 export async function post(url: string, init: RequestInit, retried = false): Promise<Response> {
+  try {
+    return await once(url, init)
+  } catch (error) {
+    if (dnsFailed(error)) return pinned(url, init)
+    if (!retried && socketClosed(error)) return post(url, init, true)
+    throw error
+  }
+}
+
+type FetchInit = RequestInit & { tls?: { serverName?: string } }
+
+async function once(url: string, init: FetchInit) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), HEADERS_MS)
   return fetch(url, { ...init, signal: controller.signal })
     .catch((error: unknown) => {
       if (controller.signal.aborted) throw new Error(`No response from ${new URL(url).host} in ${HEADERS_MS / 1000}s`)
-      if (retried || !String((error as Error)?.message).includes("socket connection was closed")) throw error
-      return post(url, init, true)
+      throw error
     })
     .finally(() => clearTimeout(timer))
+}
+
+function socketClosed(error: unknown) {
+  return String((error as Error)?.message).includes("socket connection was closed")
+}
+
+function dnsFailed(error: unknown) {
+  const code = (error as { code?: string })?.code
+  if (code === "ENOTFOUND" || code === "EAI_AGAIN") return true
+  return /getaddrinfo|ENOTFOUND|EAI_AGAIN/i.test(String((error as Error)?.message ?? ""))
+}
+
+// One minute is enough for the pieces of one reading, and short enough that a speech
+// provider IP change is picked up on the next one.
+const RESOLVE_MS = 60_000
+const resolved = new Map<string, { address: string; until: number }>()
+
+async function pinned(url: string, init: RequestInit) {
+  const target = new URL(url)
+  const address = await resolveHost(target.hostname)
+  const pinnedUrl = new URL(url)
+  pinnedUrl.hostname = address
+  const headers = new Headers(init.headers)
+  headers.set("host", target.host)
+  log("dns-bypass", { host: target.hostname, address })
+  try {
+    return await once(pinnedUrl.toString(), {
+      ...init,
+      headers,
+      tls: target.protocol === "https:" ? { serverName: target.hostname } : undefined,
+    })
+  } catch (error) {
+    resolved.delete(target.hostname)
+    throw error
+  }
+}
+
+async function resolveHost(hostname: string) {
+  const cached = resolved.get(hostname)
+  if (cached && cached.until > Date.now()) return cached.address
+  const address = (await libcLookup(hostname)) ?? (await doh(hostname)) ?? (await systemLookup(hostname))
+  if (!address) throw new Error(`getaddrinfo ENOTFOUND ${hostname}`)
+  resolved.set(hostname, { address, until: Date.now() + RESOLVE_MS })
+  return address
+}
+
+/** POSIX getaddrinfo, which fails over supplemental resolvers. Bun's default macOS client does not. */
+async function libcLookup(hostname: string) {
+  try {
+    const { dns } = await import("bun")
+    const found = await dns.lookup(hostname, { backend: "libc" })
+    return found.find((entry) => entry.family === 4)?.address
+  } catch {
+    return
+  }
+}
+
+const DOH = ["1.1.1.1", "1.0.0.1"]
+
+/** DNS-over-HTTPS to a literal address, so a stuck in-process resolver is not consulted. */
+async function doh(hostname: string) {
+  for (const server of DOH) {
+    try {
+      const response = await fetch(
+        `https://${server}/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
+        { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(3000) },
+      )
+      if (!response.ok) continue
+      const body = (await response.json()) as { Answer?: { type?: number; data?: string }[] }
+      const address = body.Answer?.find((record) => record.type === 1 && ipv4(record.data))?.data
+      if (address) return address
+    } catch {
+      continue
+    }
+  }
+}
+
+/** A fresh process uses the system resolver, which is what still works when this one does not. */
+async function systemLookup(hostname: string) {
+  if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) return
+  const commands = [
+    ["dscacheutil", "-q", "host", "-a", "name", hostname],
+    ["python3", "-c", "import socket,sys; print(socket.getaddrinfo(sys.argv[1], 443, socket.AF_INET)[0][4][0])", hostname],
+  ]
+  for (const cmd of commands) {
+    try {
+      const child = Bun.spawn(cmd, { stdout: "pipe", stderr: "ignore", timeout: 3000 })
+      const text = await new Response(child.stdout).text()
+      if ((await child.exited) !== 0) continue
+      const address = text.match(/\b(\d{1,3}(?:\.\d{1,3}){3})\b/)?.[1]
+      if (ipv4(address)) return address
+    } catch {
+      continue
+    }
+  }
+}
+
+function ipv4(address: string | undefined): address is string {
+  if (!address) return false
+  const parts = address.split(".")
+  return parts.length === 4 && parts.every((part) => /^\d{1,3}$/.test(part) && Number(part) <= 255)
 }
 
 async function lines(body: NonNullable<Response["body"]>, each: (line: string) => void) {

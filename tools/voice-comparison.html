@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>TTS voice comparison</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #252537;
+        --muted: #6c6c7e;
+        --line: #e3e2ed;
+        --accent: #6b54d8;
+        --lavender: #eeebff;
+        --paper: #f7f7fb;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        background: var(--paper);
+        color: var(--ink);
+        font:
+          15px/1.55 -apple-system,
+          BlinkMacSystemFont,
+          "Segoe UI",
+          sans-serif;
+        padding-bottom: 180px;
+      }
+      main {
+        max-width: 1100px;
+        margin: auto;
+        padding: 52px 28px;
+      }
+      h1 {
+        font-size: clamp(32px, 5vw, 52px);
+        letter-spacing: -2px;
+        line-height: 1.1;
+        margin: 14px 0 18px;
+        font-weight: 650;
+      }
+      h2 {
+        font-size: 20px;
+        margin: 0;
+      }
+      p {
+        margin: 8px 0;
+      }
+      .eyebrow {
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.14em;
+        text-transform: uppercase;
+        color: var(--accent);
+      }
+      .intro {
+        max-width: 680px;
+        color: var(--muted);
+        font-size: 17px;
+      }
+      button,
+      select {
+        font: inherit;
+      }
+      button {
+        cursor: pointer;
+        border: 1px solid var(--line);
+        background: white;
+        color: var(--ink);
+        border-radius: 9px;
+        padding: 10px 15px;
+        font-weight: 600;
+        transition: background 0.15s;
+      }
+      button:hover {
+        background: #f0eefb;
+      }
+      button:focus-visible,
+      select:focus-visible {
+        outline: 3px solid #b7aaff;
+        outline-offset: 3px;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: white;
+      }
+      button.primary:hover {
+        background: #5843bc;
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+      button[aria-pressed="true"] {
+        background: var(--lavender);
+        color: var(--accent);
+        border-color: #c5b9ff;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        flex-wrap: wrap;
+      }
+      .section {
+        margin-top: 28px;
+      }
+      .panel {
+        background: white;
+        border: 1px solid var(--line);
+        border-radius: 20px;
+        padding: 20px;
+      }
+      .reference {
+        display: flex;
+        justify-content: space-between;
+        gap: 22px;
+        align-items: center;
+        margin-top: 30px;
+      }
+      .reference p {
+        color: var(--muted);
+        max-width: 740px;
+        font-size: 14px;
+      }
+      .reference button {
+        flex-shrink: 0;
+      }
+      .toolbar {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        align-items: flex-end;
+        margin-bottom: 14px;
+      }
+      .tabs {
+        display: flex;
+        gap: 4px;
+        padding: 5px;
+        border: 1px solid var(--line);
+        border-radius: 15px;
+        background: white;
+        flex-wrap: wrap;
+      }
+      .tabs button {
+        border-radius: 9px;
+        border-color: transparent;
+        padding: 8px 12px;
+        font-size: 13px;
+      }
+      .caption {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      .passage {
+        border-left: 3px solid #b9acf5;
+        padding: 4px 18px;
+        margin: 18px 0 24px;
+        color: #505065;
+      }
+      .passage p {
+        margin: 7px 0;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+      .card {
+        display: flex;
+        flex-direction: column;
+        min-height: 270px;
+        padding: 16px;
+        border: 1px solid var(--line);
+        border-radius: 24px;
+        background: white;
+      }
+      .card.selected {
+        border-color: #a896f5;
+        box-shadow: 0 0 0 2px #ede8ff;
+      }
+      .card.playing {
+        background: #faf8ff;
+      }
+      .badge {
+        font-size: 11px;
+        letter-spacing: 0.035em;
+        color: var(--accent);
+        font-weight: 650;
+        min-height: 22px;
+      }
+      .card h2 {
+        margin: 7px 0;
+      }
+      .card p {
+        font-size: 13px;
+        color: var(--muted);
+        flex: 1;
+      }
+      .meta {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: ui-monospace, monospace;
+        margin: 8px 0 18px;
+      }
+      .card-actions {
+        display: flex;
+        gap: 8px;
+      }
+      .card-actions button {
+        border-radius: 7px;
+        font-size: 13px;
+        padding: 8px 12px;
+      }
+      .card-actions .choose {
+        margin-left: auto;
+      }
+      .ab {
+        display: grid;
+        grid-template-columns: 1fr 1fr auto;
+        gap: 12px;
+        align-items: end;
+        margin-top: 24px;
+      }
+      .field {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      select {
+        padding: 11px 12px;
+        border: 1px solid var(--line);
+        border-radius: 9px;
+        background: white;
+        color: var(--ink);
+        width: 100%;
+      }
+      .choice {
+        margin-top: 20px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+      }
+      .choice strong {
+        font-size: 15px;
+      }
+      .choice p {
+        font-size: 13px;
+        color: var(--muted);
+      }
+      pre {
+        white-space: pre-wrap;
+        font-size: 12px;
+        background: #f5f4fa;
+        padding: 14px;
+        border-radius: 9px;
+        max-width: 520px;
+        margin: 0;
+      }
+      .player {
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        background: rgba(255, 255, 255, 0.97);
+        border-top: 1px solid var(--line);
+        backdrop-filter: blur(14px);
+        padding: 18px 28px;
+        z-index: 3;
+      }
+      .player-inner {
+        max-width: 1044px;
+        margin: auto;
+        display: grid;
+        grid-template-columns: 1fr minmax(280px, 430px) auto;
+        gap: 24px;
+        align-items: center;
+      }
+      audio {
+        width: 100%;
+        height: 40px;
+      }
+      .playing-title {
+        font-weight: 650;
+      }
+      .status {
+        font-size: 12px;
+        color: var(--muted);
+        min-height: 19px;
+      }
+      .rate {
+        min-width: 105px;
+      }
+      .fine {
+        margin-top: 24px;
+        color: var(--muted);
+        font-size: 12px;
+      }
+      .error {
+        color: #b13246;
+      }
+      .duration {
+        font-variant-numeric: tabular-nums;
+        font-size: 12px;
+        color: var(--muted);
+      }
+      [hidden] {
+        display: none !important;
+      }
+      @media (max-width: 850px) {
+        .cards {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+        }
+        .toolbar {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .player-inner {
+          grid-template-columns: 1fr auto;
+          gap: 8px 20px;
+        }
+        .player audio {
+          grid-column: 1/-1;
+          grid-row: 2;
+        }
+        .reference {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+        .ab {
+          grid-template-columns: 1fr 1fr;
+        }
+        .ab button {
+          grid-column: 1/-1;
+        }
+        .choice {
+          align-items: flex-start;
+          flex-direction: column;
+        }
+      }
+      @media (max-width: 540px) {
+        main {
+          padding: 30px 16px;
+        }
+        .cards {
+          grid-template-columns: 1fr;
+        }
+        .tabs {
+          width: 100%;
+        }
+        .tabs button {
+          flex: 1;
+        }
+        .player {
+          padding: 12px 16px;
+        }
+        .panel,
+        .card {
+          padding: 16px;
+          border-radius: 16px;
+        }
+        .ab {
+          grid-template-columns: 1fr;
+        }
+        .card-actions {
+          gap: 10px;
+        }
+        .card-actions button {
+          border-radius: 3px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <header>
+        <div class="eyebrow">Read aloud / voice lab</div>
+        <h1>Keep the voice.<br />Get the German right.</h1>
+        <p class="intro">
+          Compare Dominic speaking German against four native German voices. Use the language-switch sample to hear how
+          much the speaker changes.
+        </p>
+      </header>
+      <section class="panel reference" aria-label="English reference">
+        <div>
+          <div class="eyebrow">Your English reference</div>
+          <p id="reference-text"></p>
+          <span class="caption">Dominic · Simba 3.0. The BCS-2 sentence stays in English after the detection fix.</span>
+        </div>
+        <button id="reference-play">Play English</button>
+      </section>
+      <section class="section" aria-label="Voice comparisons">
+        <div class="toolbar">
+          <div>
+            <h2>Same words. Different voices.</h2>
+            <p class="caption">Start at your usual 1.7×, or slow down to judge pronunciation.</p>
+          </div>
+          <div class="tabs" id="passages" aria-label="Sample passage"></div>
+        </div>
+        <div id="passage-text" class="passage"></div>
+        <div class="cards" id="cards"></div>
+        <div class="panel ab">
+          <label class="field">A<select id="compare-a" aria-label="Voice A"></select></label>
+          <label class="field">B<select id="compare-b" aria-label="Voice B"></select></label>
+          <button class="primary" id="compare-play">Play A, then B</button>
+          <span class="caption" style="grid-column: 1/-1"
+            >One passage at a time, with a short pause between voices. Playing another sample cancels the
+            sequence.</span
+          >
+        </div>
+        <div class="panel choice" id="choice" hidden>
+          <div>
+            <strong id="choice-title"></strong>
+            <p>Saved on this page only. This does not change your plugin.</p>
+            <button id="copy-config">Copy German voice setting</button
+            ><span class="caption" id="copy-status" role="status"></span>
+          </div>
+          <pre id="config"></pre>
+        </div>
+        <p class="fine">
+          All samples are pre-generated Speechify audio. English sections always use your current Dominic voice on Simba
+          3.0. Candidate voices and models change only the German. Playback speed is local, with pitch preserved. No
+          autoplay, no API key and no network requests are needed by this page. Voice descriptions come from the
+          catalog, not a listening verdict.
+        </p>
+      </section>
+    </main>
+    <footer class="player">
+      <div class="player-inner">
+        <div>
+          <div class="playing-title" id="now-title">Choose a sample</div>
+          <div class="status" id="status" role="status" aria-live="polite">Nothing plays until you press Play.</div>
+        </div>
+        <audio id="player" controls preload="metadata"></audio
+        ><label class="field rate"
+          >Speed<select id="speed">
+            <option value="0.85">0.85×</option>
+            <option value="1">1×</option>
+            <option value="1.3">1.3×</option>
+            <option value="1.7" selected>1.7×</option>
+            <option value="2">2×</option>
+          </select></label
+        >
+      </div>
+    </footer>
+    <script>
+      const data = null /* SAMPLE_DATA */
+      const $ = (id) => document.getElementById(id)
+      const player = $("player")
+      let passage = "switch",
+        selected = "",
+        sequence = [],
+        timer,
+        generation = 0
+      try {
+        selected = localStorage.getItem("tts-german-voice") || ""
+      } catch {}
+      if (!data.candidates.some((candidate) => candidate.id === selected)) selected = ""
+      const sample = (candidate) =>
+        data.samples.find((item) => item.candidate === candidate && item.passage === passage)
+      const setStatus = (text, error = false) => {
+        $("status").textContent = text
+        $("status").classList.toggle("error", error)
+      }
+      function stopSequence() {
+        clearTimeout(timer)
+        sequence = []
+      }
+      function playFile(file, title, candidate = "") {
+        const attempt = ++generation
+        player.pause()
+        player.src = file
+        player.playbackRate = Number($("speed").value)
+        player.preservesPitch = true
+        $("now-title").textContent = title
+        document
+          .querySelectorAll(".card")
+          .forEach((card) => card.classList.toggle("playing", card.dataset.id === candidate))
+        setStatus("Loading audio…")
+        player
+          .play()
+          .then(() => {
+            if (attempt === generation) setStatus("Playing. Use the player to pause or seek.")
+          })
+          .catch((error) => {
+            if (attempt !== generation) return
+            stopSequence()
+            setStatus(`Could not play: ${error.message}`, true)
+          })
+      }
+      function playCandidate(id) {
+        const candidate = data.candidates.find((item) => item.id === id)
+        const clip = sample(id)
+        playFile(clip.file, `${candidate.name} · ${data.passages.find((item) => item.id === passage).label}`, id)
+      }
+      function choose(id) {
+        selected = id
+        try {
+          localStorage.setItem("tts-german-voice", id)
+        } catch {}
+        renderChoice()
+        document.querySelectorAll(".card").forEach((card) => {
+          const chosen = card.dataset.id === id
+          card.classList.toggle("selected", chosen)
+          card.querySelector(".choose").setAttribute("aria-pressed", String(chosen))
+          card.querySelector(".choose").textContent = chosen ? "Selected ✓" : "Choose"
+        })
+      }
+      function renderChoice() {
+        const candidate = data.candidates.find((item) => item.id === selected)
+        $("choice").hidden = !candidate
+        if (!candidate) return
+        $("choice-title").textContent = `Your pick: ${candidate.name}`
+        $("config").textContent = JSON.stringify(
+          { speechify: { german: { voice: candidate.voice, model: candidate.model } } },
+          null,
+          2,
+        )
+        $("copy-status").textContent = ""
+      }
+      function renderPassage() {
+        const current = data.passages.find((item) => item.id === passage)
+        $("passage-text").replaceChildren(
+          ...current.parts.map((text, index) => {
+            const p = document.createElement("p")
+            p.textContent = text
+            p.lang = passage === "switch" && index !== 1 ? "en" : "de"
+            return p
+          }),
+        )
+        document
+          .querySelectorAll("#passages button")
+          .forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.id === passage)))
+        $("cards").replaceChildren(
+          ...data.candidates.map((candidate) => {
+            const card = document.createElement("article")
+            card.className = "card"
+            card.dataset.id = candidate.id
+            const label = document.createElement("div")
+            label.className = "badge"
+            label.textContent = candidate.label
+            const name = document.createElement("h2")
+            name.textContent = candidate.name
+            const note = document.createElement("p")
+            note.textContent = candidate.note
+            const meta = document.createElement("div")
+            meta.className = "meta"
+            meta.textContent = `${candidate.voice} · ${candidate.model}`
+            const actions = document.createElement("div")
+            actions.className = "card-actions"
+            const play = document.createElement("button")
+            play.className = "primary"
+            play.textContent = "▶ Play"
+            play.setAttribute("aria-label", `Play ${candidate.name}`)
+            play.onclick = () => {
+              stopSequence()
+              playCandidate(candidate.id)
+            }
+            const duration = document.createElement("span")
+            duration.className = "duration"
+            duration.textContent = `${Math.round(sample(candidate.id).duration)}s`
+            duration.style.alignSelf = "center"
+            const pick = document.createElement("button")
+            pick.className = "choose"
+            pick.textContent = "Choose"
+            pick.setAttribute("aria-label", `Choose ${candidate.name}`)
+            pick.onclick = () => choose(candidate.id)
+            actions.append(play, duration, pick)
+            card.append(label, name, note, meta, actions)
+            return card
+          }),
+        )
+        if (selected) choose(selected)
+      }
+      $("reference-text").textContent = data.reference.text
+      data.passages.forEach((item) => {
+        const button = document.createElement("button")
+        button.textContent = item.label
+        button.dataset.id = item.id
+        button.onclick = () => {
+          stopSequence()
+          generation++
+          player.pause()
+          player.removeAttribute("src")
+          player.load()
+          passage = item.id
+          renderPassage()
+          $("now-title").textContent = "Choose a sample"
+          setStatus("Passage changed. Choose a voice to listen.")
+        }
+        $("passages").append(button)
+      })
+      for (const id of ["compare-a", "compare-b"]) {
+        data.candidates.forEach((candidate) => {
+          const option = document.createElement("option")
+          option.value = candidate.id
+          option.textContent = candidate.name
+          $(id).append(option)
+        })
+      }
+      $("compare-a").value = "dominic-30"
+      $("compare-b").value = "henrik"
+      $("reference-play").onclick = () => {
+        stopSequence()
+        playFile(data.reference.file, "Dominic · English reference")
+      }
+      $("compare-play").onclick = () => {
+        stopSequence()
+        const a = $("compare-a").value,
+          b = $("compare-b").value
+        sequence = [b]
+        playCandidate(a)
+      }
+      $("speed").onchange = () => {
+        player.playbackRate = Number($("speed").value)
+      }
+      player.addEventListener("ended", () => {
+        const next = sequence.shift()
+        if (next) {
+          setStatus("Switching to voice B…")
+          timer = setTimeout(() => playCandidate(next), 450)
+        } else {
+          document.querySelectorAll(".card").forEach((card) => card.classList.remove("playing"))
+          setStatus("Finished. Pick another voice or replay.")
+        }
+      })
+      player.addEventListener("pause", () => {
+        if (!player.ended && player.currentTime > 0) setStatus("Paused.")
+      })
+      player.addEventListener("error", () => {
+        stopSequence()
+        setStatus("Audio could not load. Keep the audio folder beside this HTML file.", true)
+      })
+      $("copy-config").onclick = async () => {
+        try {
+          await navigator.clipboard.writeText($("config").textContent)
+          $("copy-status").textContent = " Copied."
+        } catch {
+          const range = document.createRange()
+          range.selectNodeContents($("config"))
+          const selection = getSelection()
+          selection.removeAllRanges()
+          selection.addRange(range)
+          $("copy-status").textContent = " Selected. Press Copy to copy the setting."
+        }
+      }
+      renderPassage()
+      renderChoice()
+    </script>
+  </body>
+</html>

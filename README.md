@@ -106,7 +106,7 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 
 - **Finding the text.** The plugin walks the rendered transcript for the markdown view whose content matches each answer part. It reads that view's prose blocks: paragraphs, headings and list items.
 - **Building the script.** The prose is turned into a plain-text script, with a map from every script character back to its position in the markdown.
-- **Speech.** A local trigram detector (`franc-min`) and common function words identify English and German. Weak sentence guesses inherit their paragraph's language; clear evidence can still switch within a paragraph. Adjacent sentences in the same language share requests, up to 2,000 characters. Language changes always start a new request with an explicit language. Speechify also selects a native voice. Each piece goes to the streaming `with-timestamps` endpoint when playback is within 8 wall-clock seconds of running out, or when a word in it is clicked. Playback starts on the first audio chunk. Stopping cancels pending synthesis; pausing keeps it resumable.
+- **Speech.** A local ELD model identifies English and German. Only those two languages are bundled (about 136 KB), not the full multilingual database. Weak sentence guesses inherit their paragraph's language; clear evidence can still switch within a paragraph. Adjacent sentences in the same language share requests, up to 2,000 characters. Language changes always start a new request with an explicit language. Speechify also selects a native voice. Each piece goes to the streaming `with-timestamps` endpoint when playback is within 8 wall-clock seconds of running out, or when a word in it is clicked. Playback starts on the first audio chunk. Stopping cancels pending synthesis; pausing keeps it resumable.
 - **Timing.** ElevenLabs times every character; Speechify times every word, and each character takes the start of its word. Each piece's timings are shifted by the MPEG sample duration of the preceding pieces, including encoder padding. This keeps highlights aligned across voice changes.
 - **Audio.** Audio is piped through `ffmpeg` (for the seek and the `atempo` speed change) into opentui's audio output.
 - **Highlighting.** Every 40 ms the playback position is mapped to a word. That word and its sentence are highlighted by extending the block's `onHighlight`, using two styles registered on the block's syntax style and tinted from the theme's primary colour.
@@ -115,6 +115,8 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 ## License
 
 MIT
+
+The bundled language detector is derived from Nito T.M.'s ELD 2.1.1 medium model and is licensed under Apache-2.0. See `detector.LICENSE`. To rebuild its English/German subset after installing development dependencies, run `bun run build:detector`.
 
 ## Compare German voices
 

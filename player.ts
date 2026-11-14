@@ -18,6 +18,7 @@ const DIR = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".ca
 // on a sentence and grow from the first, which is small so playback starts quickly.
 // Seconds of 1x audio left before the next piece is requested.
 const LEAD = 8
+const POLICY = "language-v4-eld"
 // Audio decoded and waiting for this long without a frame reaching the speakers means the
 // output is dead, as after the default device switches to AirPods under a running engine.
 const STALL_MS = 2500
@@ -187,7 +188,13 @@ export async function load(
     )
   const provider = found.provider
   const ranges = pieces(text, blocks)
-  log("load", { provider: provider.name, chars: text.length, pieces: ranges.length })
+  log("load", {
+    provider: provider.name,
+    chars: text.length,
+    pieces: ranges.length,
+    policy: POLICY,
+    languages: ranges.map((range) => range.language),
+  })
   const result = clip({ chunks: [], starts: [], done: false })
   const controller = new AbortController()
   result.cancel = async () => {
@@ -761,7 +768,7 @@ async function firstKey() {
 
 function files(provider: Provider, text: string, language: Language, directory: string) {
   const id = new Bun.CryptoHasher("sha256")
-    .update(`language-v3\0${provider.name}\0${provider.voice}\0${provider.model}\0${language}\0${text}`)
+    .update(`${POLICY}\0${provider.name}\0${provider.voice}\0${provider.model}\0${language}\0${text}`)
     .digest("hex")
   return { audio: Bun.file(path.join(directory, `${id}.mp3`)), meta: Bun.file(path.join(directory, `${id}.json`)) }
 }

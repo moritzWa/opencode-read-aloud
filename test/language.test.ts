@@ -93,3 +93,76 @@ test("weak sentence guesses inherit the paragraph, while clear German still swit
   expect(ranges.map((range) => range.language)).toEqual(["en", "de", "en"])
   expect(text.slice(ranges[0].start, ranges[0].end)).toContain("Subject: Lando Health GmbH")
 })
+
+test("recommendations stay English both alone and in the reported live-offer passage", () => {
+  const paragraphs = [
+    "Everything is staged as a draft on the live Word offer, and nothing is submitted. Do I submit it? I recommend yes.",
+    'Microsoft sent Excel back with "Attention needed" too, so nothing on our side blocks the submit.',
+  ]
+  expect(language("I recommend yes.")).toBe("en")
+  expect(pieces("I recommend yes.").map((range) => range.language)).toEqual(["en"])
+  const script = build(paragraphs)
+  expect(pieces(script.text, script.blocks).every((range) => range.language === "en")).toBe(true)
+  expect(pieces(paragraphs.join(" ")).every((range) => range.language === "en")).toBe(true)
+})
+
+test("ordinary short English and German statements are detected without phrase-specific exceptions", () => {
+  const examples = {
+    en: [
+      "I recommend yes.",
+      "I recommend no.",
+      "I think so.",
+      "That sounds good.",
+      "Please go ahead.",
+      "Nothing was submitted.",
+      "Do I submit it?",
+      "This is ready.",
+      "I would wait.",
+      "The draft is staged.",
+      "No action is needed.",
+      "It works now.",
+      "We can proceed.",
+      "The issue is resolved.",
+      "Yes, please.",
+      "Not sent.",
+    ],
+    de: [
+      "Ich empfehle ja.",
+      "Ich empfehle nein.",
+      "Das klingt gut.",
+      "Bitte fortfahren.",
+      "Noch nicht gesendet.",
+      "Das ist bereit.",
+      "Ich würde warten.",
+      "Der Entwurf ist fertig.",
+      "Keine Aktion erforderlich.",
+      "Es funktioniert jetzt.",
+      "Wir können fortfahren.",
+      "Das Problem ist gelöst.",
+      "Ja, bitte.",
+      "Vielen Dank.",
+    ],
+  }
+  const languages = ["en", "de"] as const
+  languages.forEach((expected) =>
+    examples[expected].forEach((text) => {
+      expect(language(text)).toBe(expected)
+    }),
+  )
+})
+
+test("the compact model preserves upstream ELD medium scores for English and German", async () => {
+  const { eld } = await import("eld/medium")
+  const { detector } = await import("../detector.js")
+  const reference = eld.newInstance()
+  reference.setLanguageSubset(["en", "de"])
+  for (const text of [
+    "I recommend yes.",
+    "It doesn't establish that BCS-2 automates poorly.",
+    "Sehr geehrter Herr Dr. Happe,",
+    "Vielen Dank für Ihre Rückmeldung.",
+  ]) {
+    expect(detector.detect(text).language).toBe(reference.detect(text).language)
+    expect(detector.detect(text).getScores()).toEqual(reference.detect(text).getScores())
+  }
+})

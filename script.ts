@@ -12,6 +12,7 @@ export type Script = {
   offset: Int32Array
   words: Range[]
   sentences: Range[]
+  blocks: Range[]
 }
 
 // Removed or rewritten when speaking: images, links (spoken as their label),
@@ -151,6 +152,11 @@ export function build(segments: readonly (string | Piece)[]): Script {
     segment: Int32Array.from(segment),
     offset: Int32Array.from(offset),
     words,
+    blocks: segment.reduce<Range[]>((ranges, seg, index) => {
+      if (index === 0 || seg !== segment[index - 1]) ranges.push({ start: index, end: index + 1 })
+      else ranges[ranges.length - 1].end = index + 1
+      return ranges
+    }, []),
     sentences: sentences(text, segment, words),
   }
 }

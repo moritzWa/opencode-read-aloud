@@ -77,7 +77,7 @@ type Reading = {
   stalls: number
 }
 
-const tui: TuiPlugin = async (api, options) => {
+const tui = (async (api, options) => {
   const opts = options ?? {}
   const placement = opts.placement === "footer" ? "footer" : "right"
   configure(opts)
@@ -87,6 +87,7 @@ const tui: TuiPlugin = async (api, options) => {
   )
 
   let current: Reading | undefined
+  let opening = 0
   const [rate, setRate] = createSignal(clampRate(api.kv.get(KV_RATE, DEFAULT_RATE)))
   const [status, setStatusSignal] = createSignal<Status>("idle")
   const [sessionID, setSessionID] = createSignal<string>()
@@ -160,6 +161,7 @@ const tui: TuiPlugin = async (api, options) => {
 
   async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
     stop()
+    const attempt = opening
     const latest = currentAnswer(api)?.messageID
     const segments = answer.partIDs.flatMap((partID) =>
       (blocks(viewOf(partID, answer.messageID)) ?? []).map((block, index) => ({
@@ -173,7 +175,11 @@ const tui: TuiPlugin = async (api, options) => {
     if (!script.text) return api.ui.toast({ variant: "info", message: "Nothing to read in this answer" })
     setSessionID(answer.sessionID)
     setStatus("loading")
-    const clip = await load(script.text).catch(fail)
+    const clip = await load(script.text, script.blocks).catch(fail)
+    if (attempt !== opening) {
+      await clip?.cancel()
+      return
+    }
     if (!clip) {
       held = false
       return setStatus("idle")
@@ -249,8 +255,12 @@ const tui: TuiPlugin = async (api, options) => {
   }
 
   function stop() {
+    opening++
     held = false
-    if (current) halt(current)
+    if (current) {
+      halt(current)
+      void current.clip.cancel()
+    }
     current = undefined
     clear()
     setStatus("idle")
@@ -452,7 +462,7 @@ const tui: TuiPlugin = async (api, options) => {
     stop()
     media.dispose()
   })
-}
+}) satisfies TuiPlugin
 
 function Controls(props: {
   api: TuiPluginApi

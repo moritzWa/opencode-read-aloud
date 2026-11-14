@@ -106,7 +106,7 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 
 - **Finding the text.** The plugin walks the rendered transcript for the markdown view whose content matches each answer part. It reads that view's prose blocks: paragraphs, headings and list items.
 - **Building the script.** The prose is turned into a plain-text script, with a map from every script character back to its position in the markdown.
-- **Speech.** A local trigram detector (`franc-min`) identifies English and German sentences using the original prose-block boundaries for context. Adjacent sentences in the same language share requests, up to 2,000 characters. Language changes always start a new request with an explicit language. Speechify also selects a native voice. Each piece goes to the streaming `with-timestamps` endpoint when playback is within 8 wall-clock seconds of running out, or when a word in it is clicked. Playback starts on the first audio chunk. Stopping cancels pending synthesis; pausing keeps it resumable.
+- **Speech.** A local trigram detector (`franc-min`) and common function words identify English and German. Weak sentence guesses inherit their paragraph's language; clear evidence can still switch within a paragraph. Adjacent sentences in the same language share requests, up to 2,000 characters. Language changes always start a new request with an explicit language. Speechify also selects a native voice. Each piece goes to the streaming `with-timestamps` endpoint when playback is within 8 wall-clock seconds of running out, or when a word in it is clicked. Playback starts on the first audio chunk. Stopping cancels pending synthesis; pausing keeps it resumable.
 - **Timing.** ElevenLabs times every character; Speechify times every word, and each character takes the start of its word. Each piece's timings are shifted by the MPEG sample duration of the preceding pieces, including encoder padding. This keeps highlights aligned across voice changes.
 - **Audio.** Audio is piped through `ffmpeg` (for the seek and the `atempo` speed change) into opentui's audio output.
 - **Highlighting.** Every 40 ms the playback position is mapped to a word. That word and its sentence are highlighted by extending the block's `onHighlight`, using two styles registered on the block's syntax style and tinted from the theme's primary colour.
@@ -115,6 +115,12 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 ## License
 
 MIT
+
+## Compare German voices
+
+Run `bun tools/voice-comparison.ts [output-directory]` to generate a local listening page. The default output is `~/Desktop/tts-voice-comparison/index.html`, with audio files beside it. Generation uses your configured Speechify key and incurs normal synthesis charges. Repeated runs reuse cached speech.
+
+The page compares Dominic on Simba 3.0 and 3.5 against Henrik, Benedikt, Frederick and Linus. Each candidate reads the same short German passage, email excerpt and English/German transition. Speed controls and A/B playback work locally. Selecting a favorite saves it in the page, not your plugin settings. The generated page contains no API key and never autoplays.
 
 ## OpenCode V2
 

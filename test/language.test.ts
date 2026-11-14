@@ -68,3 +68,28 @@ test("empty or punctuation-only text has a stable fallback", () => {
   expect(pieces("")).toEqual([])
   expect(pieces("...")).toEqual([{ start: 0, end: 3, language: "en" }])
 })
+
+test("English technical sentences do not switch to German, with or without paragraph context", () => {
+  for (const acronym of ["BCS-2", "BCS 2", "BCS", ""]) {
+    for (const apostrophe of ["'", "’"]) {
+      const sentence = `It doesn${apostrophe}t establish that ${acronym} automates poorly.`
+      expect(language(sentence)).toBe("en")
+      expect(pieces(sentence).every((range) => range.language === "en")).toBe(true)
+      const paragraphs = [
+        "My earlier advice was too categorical. The call supports your lightweight pipeline idea.",
+        sentence,
+      ]
+      const script = build(paragraphs)
+      expect(pieces(script.text, script.blocks).every((range) => range.language === "en")).toBe(true)
+      expect(pieces(paragraphs.join(" ")).every((range) => range.language === "en")).toBe(true)
+    }
+  }
+})
+
+test("weak sentence guesses inherit the paragraph, while clear German still switches", () => {
+  const text =
+    "The request is ready and you can send it. Subject: Lando Health GmbH. Das ist eine deutsche Antwort und keine englische Zusammenfassung. Not sent."
+  const ranges = pieces(text)
+  expect(ranges.map((range) => range.language)).toEqual(["en", "de", "en"])
+  expect(text.slice(ranges[0].start, ranges[0].end)).toContain("Subject: Lando Health GmbH")
+})

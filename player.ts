@@ -761,7 +761,7 @@ async function firstKey() {
 
 function files(provider: Provider, text: string, language: Language, directory: string) {
   const id = new Bun.CryptoHasher("sha256")
-    .update(`language-v2\0${provider.name}\0${provider.voice}\0${provider.model}\0${language}\0${text}`)
+    .update(`language-v3\0${provider.name}\0${provider.voice}\0${provider.model}\0${language}\0${text}`)
     .digest("hex")
   return { audio: Bun.file(path.join(directory, `${id}.mp3`)), meta: Bun.file(path.join(directory, `${id}.json`)) }
 }

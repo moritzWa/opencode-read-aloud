@@ -79,7 +79,7 @@ test("V2 adapter maps native slots, keymap fallthrough, options, events and disp
   bridge.api.event.on("session.idle", (event: { properties: { sessionID: string } }) => { idle = event.properties.sessionID })
   listeners[1]({ details: { type: "session.execution.succeeded", data: { sessionID: "ses_fixture" } } })
   expect(idle).toBe("ses_fixture")
-  expect((await bridge.api.client.command.list()).data).toEqual([{ name: "other-command" }])
+  expect((await bridge.api.client.command.list()).data?.map((command) => command.name)).toEqual(["other-command"])
   mode = "modal"
   expect(bridge.api.ui.dialog.open).toBe(true)
   await bridge.dispose()

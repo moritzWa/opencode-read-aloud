@@ -21,7 +21,10 @@
   "exports": {
     "./tui": "./index.tsx",
     "./v2": "./v2.js",
-    "./v2-compat": { "types": "./v2-compat.d.ts", "import": "./v2-compat.js" }
+    "./v2-compat": {
+      "types": "./v2-compat.d.ts",
+      "import": "./v2-compat.js"
+    }
   },
   "files": [
     "index.tsx",
@@ -29,6 +32,7 @@
     "answer.ts",
     "agentview.ts",
     "player.ts",
+    "language.ts",
     "media.ts",
     "nowplaying.swift",
     "script.ts",
@@ -40,7 +44,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
     "@opencode-ai/plugin": "1.18.34",
@@ -49,7 +54,8 @@
     "@opentui/keymap": "0.4.5",
     "@opentui/solid": "0.4.5",
     "@types/bun": "latest",
-    "solid-js": "1.9.10"
+    "solid-js": "1.9.10",
+    "typescript": "^7.0.2"
   },
   "author": {
     "name": "Moritz Wallawitsch",
@@ -71,5 +77,8 @@
     "@opentui/keymap": ">=0.4.5",
     "@opentui/solid": ">=0.4.5",
     "solid-js": ">=1.9.10"
+  },
+  "dependencies": {
+    "franc-min": "^6.2.0"
   }
 }

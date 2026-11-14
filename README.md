@@ -14,6 +14,7 @@ The same 20 seconds with sound: [assets/demo.mp4](assets/demo.mp4).
 - Inside Agent View, starting playback pauses a voice call first, including double-click, Option+click and playback controls. Standalone OpenCode is unchanged.
 - On macOS the AirPods button and the keyboard's play/pause key pause and resume reading while it is active, instead of starting your music. This needs the Xcode command line tools (`xcode-select --install`), which compile a small helper on first use. Once reading stops, the keys go back to your music app.
 - Speech is synthesized a few sentences ahead of playback, so stopping after the first sentence only pays for the first sentence or two.
+- Speechify switches between native English and German voices within an answer. English keeps your configured voice; German uses Henrik by default. Detection runs locally, sentence by sentence. Names and short ambiguous text inherit nearby context. This currently detects English and German, not other languages.
 - Audio is cached, so replaying an answer or jumping around in it costs nothing after the first read.
 
 ## Requirements
@@ -88,7 +89,7 @@ OpenCode loads the TypeScript source directly, so there is nothing to build.
 | `keybinds`  | see below | Keys for the commands. `"none"` or `false` unbinds one.                    |
 | `placement` | `"right"` | `"right"` puts the controls on the prompt row (`session_prompt_right`). `"footer"` uses a `session_prompt_footer` slot, for OpenCode builds that have one. |
 | `highlight` | Theme-derived | Optional hex background colors for `sentence` and `word`, independent of the theme's action text. For a light blue/lavender reading highlight: `{ "sentence": "#e2e2ff", "word": "#adadff" }`. Works in V1 and V2. |
-| `speechify` | none | `{ "voice", "model" }` for Speechify. Overrides `SPEECHIFY_VOICE_ID` and `SPEECHIFY_MODEL_ID`. |
+| `speechify` | none | `{ "voice", "model", "german": { "voice", "model" } }`. English uses the configured voice/model. German defaults to `henrik-agent` on `simba-3.0`; override it with `german`. The top-level fields override `SPEECHIFY_VOICE_ID` and `SPEECHIFY_MODEL_ID`. |
 | `elevenlabs` | none | `{ "voice", "model" }` for ElevenLabs. Overrides `ELEVENLABS_VOICE_ID` and `ELEVENLABS_MODEL_ID`. |
 
 | Keybind          | Default | Command                            |
@@ -105,10 +106,11 @@ All five commands are also in the command palette (`ctrl+p`) under "Speech".
 
 - **Finding the text.** The plugin walks the rendered transcript for the markdown view whose content matches each answer part. It reads that view's prose blocks: paragraphs, headings and list items.
 - **Building the script.** The prose is turned into a plain-text script, with a map from every script character back to its position in the markdown.
-- **Speech.** The script is split after sentence ends into pieces that grow from about 200 characters to 2,000. Each piece goes to Speechify's or ElevenLabs' streaming `with-timestamps` endpoint only when playback is within 8 seconds of the audio so far running out, or when a word in it is clicked. Playback starts on the first chunk. ElevenLabs times every character; Speechify times every word, and each character takes the start of its word. Each piece's timings are shifted by the length of the audio before it, which both providers' constant 128 kbps mp3 gives from its size.
+- **Speech.** A local trigram detector (`franc-min`) identifies English and German sentences using the original prose-block boundaries for context. Adjacent sentences in the same language share requests, up to 2,000 characters. Language changes always start a new request with an explicit language. Speechify also selects a native voice. Each piece goes to the streaming `with-timestamps` endpoint when playback is within 8 wall-clock seconds of running out, or when a word in it is clicked. Playback starts on the first audio chunk. Stopping cancels pending synthesis; pausing keeps it resumable.
+- **Timing.** ElevenLabs times every character; Speechify times every word, and each character takes the start of its word. Each piece's timings are shifted by the MPEG sample duration of the preceding pieces, including encoder padding. This keeps highlights aligned across voice changes.
 - **Audio.** Audio is piped through `ffmpeg` (for the seek and the `atempo` speed change) into opentui's audio output.
 - **Highlighting.** Every 40 ms the playback position is mapped to a word. That word and its sentence are highlighted by extending the block's `onHighlight`, using two styles registered on the block's syntax style and tinted from the theme's primary colour.
-- **Cache.** Audio and timings are cached in `~/.cache/opencode/speech/`, one file per piece, keyed by a hash of the voice, the model and the piece's text. A whole-answer reading cached by an earlier version, from either provider, is reused before anything new is requested.
+- **Cache.** Audio, timings and durations are cached in `~/.cache/opencode/speech/`. Keys include the provider, voice, model, language, text and synthesis-policy version. Older caches stay on disk but are not reused, so previously mispronounced audio is generated again.
 
 ## License
 

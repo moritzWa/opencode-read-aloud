@@ -3,6 +3,10 @@ import os from "os"
 import { mkdir } from "node:fs/promises"
 import { appendFileSync, mkdirSync, renameSync, statSync } from "node:fs"
 import { Audio } from "@opentui/core"
+import { pieces, type Language } from "./language"
+import type { Range } from "./script"
+
+export { pieces } from "./language"
 
 // The same folders OpenCode itself uses, so the key files and the audio cache are
 // shared with OpenCode's own data.
@@ -12,12 +16,8 @@ const DIR = path.join(process.env.XDG_CACHE_HOME || path.join(os.homedir(), ".ca
 // Answers are synthesized a piece at a time, just ahead of playback, since the services
 // bill every character sent and most readings stop after a sentence or two. Pieces end
 // on a sentence and grow from the first, which is small so playback starts quickly.
-const FIRST_PIECE = 200
-const MAX_PIECE = 2000
 // Seconds of 1x audio left before the next piece is requested.
 const LEAD = 8
-// Both providers are asked for constant 128 kbps mp3, so a piece's length is its size.
-const BYTES_PER_SECOND = 128_000 / 8
 // Audio decoded and waiting for this long without a frame reaching the speakers means the
 // output is dead, as after the default device switches to AirPods under a running engine.
 const STALL_MS = 2500
@@ -46,13 +46,22 @@ export function log(event: string, data: Record<string, unknown> = {}) {
 const children = new Set<Bun.Subprocess>()
 process.once("exit", () => children.forEach((child) => child.kill("SIGKILL")))
 
-type Provider = {
+export type Provider = {
   name: string
   env: string
   keyFile: string
   voice: string
   model: string
-  synthesize: (text: string, key: string, voice: string, model: string, target: Target) => Promise<void>
+  german?: { voice: string; model: string }
+  synthesize: (
+    text: string,
+    key: string,
+    voice: string,
+    model: string,
+    target: Target,
+    language: Language,
+    signal: AbortSignal,
+  ) => Promise<void>
 }
 
 // Speechify first: it is about a fifth of ElevenLabs' price and has a free monthly allowance.
@@ -64,6 +73,7 @@ const PROVIDERS: Provider[] = [
     // Dominic, a deep American voice made for simba-3.2.
     voice: process.env.SPEECHIFY_VOICE_ID ?? "dominic_32",
     model: process.env.SPEECHIFY_MODEL_ID ?? "simba-3.2",
+    german: { voice: "henrik-agent", model: "simba-3.0" },
     synthesize: speechify,
   },
   {
@@ -84,6 +94,12 @@ export function configure(options: Record<string, unknown>) {
     if (!settings || typeof settings !== "object") continue
     if ("voice" in settings && typeof settings.voice === "string") provider.voice = settings.voice
     if ("model" in settings && typeof settings.model === "string") provider.model = settings.model
+    if (provider.german && "german" in settings && settings.german && typeof settings.german === "object") {
+      if ("voice" in settings.german && typeof settings.german.voice === "string")
+        provider.german.voice = settings.german.voice
+      if ("model" in settings.german && typeof settings.german.model === "string")
+        provider.german.model = settings.german.model
+    }
   }
 }
 
@@ -144,10 +160,12 @@ export type Clip = {
   chunks: Uint8Array[]
   starts: number[]
   done: boolean
+  duration?: number
   error?: Error
   next: () => Promise<void>
-  ahead: (time: number) => void
+  ahead: (time: number, rate?: number) => void
   need: (char: number) => void
+  cancel: () => Promise<void>
 }
 
 export type Playback = {
@@ -157,25 +175,26 @@ export type Playback = {
   ended: Promise<"ended" | "stalled">
 }
 
-export async function load(text: string): Promise<Clip> {
-  // Any provider's cached reading is reused, so an answer heard before keeps its voice.
-  for (const provider of PROVIDERS) {
-    const cached = files(provider, text)
-    if (!(await cached.meta.exists())) continue
-    const timing: { starts: number[] } = await cached.meta.json()
-    log("load", { provider: provider.name, chars: text.length, cached: true })
-    return clip({ chunks: [await cached.audio.bytes()], starts: timing.starts, done: true })
-  }
-
-  const found = await firstKey()
+export async function load(
+  text: string,
+  blocks?: readonly Range[],
+  source?: { provider: Provider; key: string; directory: string },
+): Promise<Clip> {
+  const found = source ?? (await firstKey())
   if (!found)
     throw new Error(
       `Set SPEECHIFY_API_KEY or ELEVENLABS_API_KEY, or write the key to ${PROVIDERS.map((p) => p.keyFile).join(" or ")}`,
     )
   const provider = found.provider
-  const ranges = pieces(text)
+  const ranges = pieces(text, blocks)
   log("load", { provider: provider.name, chars: text.length, pieces: ranges.length })
   const result = clip({ chunks: [], starts: [], done: false })
+  const controller = new AbortController()
+  result.cancel = async () => {
+    controller.abort()
+    result.finish()
+    await chain
+  }
   // Pieces are synthesized one after another, so each begins where the audio so far ends.
   let requested = 0
   let finished = 0
@@ -186,20 +205,33 @@ export async function load(text: string): Promise<Clip> {
       const range = ranges[requested++]
       chain = chain
         .then(async () => {
-          if (result.error) return
-          end += await piece(provider, found.key, text.slice(range.start, range.end), end, result)
+          if (result.error || controller.signal.aborted) return
+          const settings = range.language === "de" && provider.german ? { ...provider, ...provider.german } : provider
+          end += await piece(
+            settings,
+            found.key,
+            text.slice(range.start, range.end),
+            range.language,
+            end,
+            result,
+            controller.signal,
+            source?.directory ?? DIR,
+          )
           finished++
+          result.duration = end
+          result.wake()
           if (finished === ranges.length) result.finish()
         })
         .catch((error: unknown) => {
+          if (controller.signal.aborted) return
           result.error = error instanceof Error ? error : new Error(String(error))
           log("synthesize-failed", { provider: provider.name, piece: requested, error: result.error.message })
           result.finish()
         })
     }
   }
-  result.ahead = (time) => {
-    if (finished === requested && time >= end - LEAD) request(requested + 1)
+  result.ahead = (time, rate = 1) => {
+    if (!controller.signal.aborted && finished === requested && time >= end - LEAD * rate) request(requested + 1)
   }
   result.need = (char) => request(ranges.findIndex((range) => range.end > char) + 1 || ranges.length)
   request(1)
@@ -210,10 +242,22 @@ export async function load(text: string): Promise<Clip> {
  * Synthesizes one piece onto the end of `result`, or reuses its cached audio, and
  * returns its length in seconds of 1x audio.
  */
-async function piece(provider: Provider, key: string, text: string, offset: number, result: Target) {
-  const cache = files(provider, text)
-  const local: Target = (await cache.meta.exists())
-    ? clip({ chunks: [await cache.audio.bytes()], starts: (await cache.meta.json()).starts, done: true })
+async function piece(
+  provider: Provider,
+  key: string,
+  text: string,
+  language: Language,
+  offset: number,
+  result: Target,
+  signal: AbortSignal,
+  directory: string,
+) {
+  const cache = files(provider, text, language, directory)
+  const meta: { starts: number[]; duration?: number } | undefined = (await cache.meta.exists())
+    ? await cache.meta.json()
+    : undefined
+  const local: Target = meta
+    ? clip({ chunks: [await cache.audio.bytes()], starts: meta.starts, done: true, duration: meta.duration })
     : clip({ chunks: [], starts: [], done: false })
   let sentChunks = 0
   let sentStarts = 0
@@ -221,34 +265,70 @@ async function piece(provider: Provider, key: string, text: string, offset: numb
     // Every response opens with an ID3 tag, which the decoder rejects mid-stream.
     while (sentChunks < local.chunks.length)
       result.chunks.push(sentChunks++ ? local.chunks[sentChunks - 1] : untagged(local.chunks[0]))
-    while (sentStarts < Math.min(local.starts.length, text.length)) result.starts.push(offset + local.starts[sentStarts++])
+    while (sentStarts < Math.min(local.starts.length, text.length))
+      result.starts.push(offset + local.starts[sentStarts++])
     result.wake()
   }
   if (!local.done) {
     local.wake = forward
     const began = Date.now()
-    await provider.synthesize(text, key, provider.voice, provider.model, local)
-    log("synthesized", { provider: provider.name, chars: text.length, ms: Date.now() - began })
+    await provider.synthesize(text, key, provider.voice, provider.model, local, language, signal)
+    signal.throwIfAborted()
+    log("synthesized", {
+      provider: provider.name,
+      voice: provider.voice,
+      model: provider.model,
+      language,
+      chars: text.length,
+      ms: Date.now() - began,
+    })
     local.chunks = local.chunks.map((chunk, index) => (index ? chunk : untagged(chunk)))
+    // The API's duration excludes encoder padding that ffmpeg still plays between
+    // pieces. Count actual MPEG samples so each seam stays on the decoded timeline.
+    local.duration = mp3Duration(local.chunks)
     // Trailing spaces after the last word have no speech mark; they share its start.
     while (local.starts.length < text.length) local.starts.push(local.starts.at(-1) ?? 0)
-    await mkdir(DIR, { recursive: true })
+    await mkdir(directory, { recursive: true })
     await Bun.write(cache.audio, new Blob(local.chunks as BlobPart[]))
-    await Bun.write(cache.meta, JSON.stringify({ starts: local.starts.slice(0, text.length) }))
+    await Bun.write(
+      cache.meta,
+      JSON.stringify({ starts: local.starts.slice(0, text.length), duration: local.duration }),
+    )
   }
   forward()
-  return local.chunks.reduce((sum, chunk) => sum + chunk.length, 0) / BYTES_PER_SECOND
+  return local.duration ?? mp3Duration(local.chunks)
 }
 
-/** Splits the text after sentence ends into pieces of at least FIRST_PIECE, then three times the last. */
-export function pieces(text: string) {
-  const ends = [...text.matchAll(/[.!?:;]\s+|\n+/g)].map((match) => match.index + match[0].length)
-  return [...ends, text.length].reduce<{ start: number; end: number }[]>((ranges, end) => {
-    const start = ranges.at(-1)?.end ?? 0
-    const size = Math.min(MAX_PIECE, FIRST_PIECE * 3 ** ranges.length)
-    if (end <= start || (end - start < size && end < text.length)) return ranges
-    return [...ranges, { start, end }]
-  }, [])
+/** Streaming providers emit MPEG Layer III frames without a seek/Xing header. */
+export function mp3Duration(chunks: readonly Uint8Array[]) {
+  const bytes = Buffer.concat(chunks)
+  let samples = 0
+  let at = 0
+  while (at + 4 <= bytes.length) {
+    if (bytes[at] !== 0xff || (bytes[at + 1] & 0xe0) !== 0xe0) {
+      at++
+      continue
+    }
+    const version = (bytes[at + 1] >> 3) & 3
+    const layer = (bytes[at + 1] >> 1) & 3
+    const index = bytes[at + 2] >> 4
+    const frequency = (bytes[at + 2] >> 2) & 3
+    if (version === 1 || layer !== 1 || index === 0 || index === 15 || frequency === 3) {
+      at++
+      continue
+    }
+    const rate = [44100, 48000, 32000][frequency] / (version === 3 ? 1 : version === 2 ? 2 : 4)
+    const bitrate =
+      (version === 3
+        ? [0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320]
+        : [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160])[index] * 1000
+    const size = Math.floor(((version === 3 ? 144 : 72) * bitrate) / rate) + ((bytes[at + 2] >> 1) & 1)
+    if (at + size > bytes.length) throw new Error("Incomplete MP3 frame from speech service")
+    samples += (version === 3 ? 1152 : 576) / rate
+    at += size
+  }
+  if (!samples) throw new Error("Speech service returned no MP3 frames")
+  return samples
 }
 
 function untagged(chunk: Uint8Array) {
@@ -316,9 +396,17 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
   )
   if (stream === "timeout") {
     // fed shows whether ffmpeg had input, so the log tells a starved ffmpeg from a stuck engine.
-    log("stream-timeout", { from: Number(from.toFixed(2)), fed: fed.bytes, chunks: source.chunks.length, done: source.done })
+    log("stream-timeout", {
+      from: Number(from.toFixed(2)),
+      fed: fed.bytes,
+      chunks: source.chunks.length,
+      done: source.done,
+    })
     proc.kill("SIGKILL")
-    void opening?.then((late) => late.dispose(), () => {})
+    void opening?.then(
+      (late) => late.dispose(),
+      () => {},
+    )
     resetAudio()
     throw new Wedged("The audio output did not start playing")
   }
@@ -341,7 +429,7 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
   let stall: () => void = () => {}
   const timer = setInterval(() => {
     const stats = stream.getStats()
-    source.ahead(position())
+    source.ahead(position(), rate)
     if (stats.framesPlayed !== played || stats.bufferedFrames === 0) {
       played = stats.framesPlayed
       since = Date.now()
@@ -375,20 +463,28 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
 }
 
 /** ElevenLabs streams one JSON object per line, with a start time for every character. */
-async function elevenlabs(text: string, key: string, voice: string, model: string, target: Target) {
+async function elevenlabs(
+  text: string,
+  key: string,
+  voice: string,
+  model: string,
+  target: Target,
+  language: Language,
+  signal: AbortSignal,
+) {
   const response = await post(
     `https://api.elevenlabs.io/v1/text-to-speech/${voice}/stream/with-timestamps?output_format=mp3_44100_128`,
     {
       method: "POST",
+      signal,
       headers: { "xi-api-key": key, "content-type": "application/json" },
-      body: JSON.stringify({ text, model_id: model }),
+      body: JSON.stringify({ text, model_id: model, language_code: language }),
     },
   )
   if (!response.ok || !response.body) throw new Error(`ElevenLabs ${response.status}: ${await response.text()}`)
   await lines(response.body, (line) => {
     if (!line.trim()) return
-    const frame: { audio_base64?: string; alignment?: { character_start_times_seconds?: number[] } } =
-      JSON.parse(line)
+    const frame: { audio_base64?: string; alignment?: { character_start_times_seconds?: number[] } } = JSON.parse(line)
     if (frame.audio_base64) target.chunks.push(Buffer.from(frame.audio_base64, "base64"))
     target.starts.push(...(frame.alignment?.character_start_times_seconds ?? []))
     target.wake()
@@ -400,12 +496,22 @@ async function elevenlabs(text: string, key: string, voice: string, model: strin
  * code point offset into the text. Every character up to a word's end takes that word's
  * start, so a script word that begins inside it, or in the gap before it, gets its time.
  */
-async function speechify(text: string, key: string, voice: string, model: string, target: Target) {
+export async function speechify(
+  text: string,
+  key: string,
+  voice: string,
+  model: string,
+  target: Target,
+  language: Language,
+  signal: AbortSignal,
+  endpoint = "https://api.speechify.ai/v1/audio/stream/with-timestamps",
+) {
   // UTF-16 index of every code point, since the script indexes the string itself.
   const units = [0]
   for (const char of text) units.push(units[units.length - 1] + char.length)
-  const response = await post("https://api.speechify.ai/v1/audio/stream/with-timestamps", {
+  const response = await post(endpoint, {
     method: "POST",
+    signal,
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
     body: JSON.stringify({
       // An emoji anywhere makes Speechify drop the last word, audio and all; a space in its
@@ -413,11 +519,13 @@ async function speechify(text: string, key: string, voice: string, model: string
       input: text.replace(/\p{Extended_Pictographic}|\p{Emoji_Modifier}|\uFE0F|\u200D/gu, " "),
       voice_id: voice,
       model,
+      language: language === "de" ? "de-DE" : "en-US",
       // Streaming only offers 24 kHz mp3 at most.
       output_format: "mp3_24000_128",
     }),
   })
   if (!response.ok || !response.body) throw new Error(`Speechify ${response.status}: ${await response.text()}`)
+  let done = false
   await lines(response.body, (line) => {
     if (!line.startsWith("data:")) return
     const event: {
@@ -427,11 +535,13 @@ async function speechify(text: string, key: string, voice: string, model: string
       error?: { code: string; message: string }
     } = JSON.parse(line.slice(5))
     if (event.type === "speech.error") throw new Error(`Speechify ${event.error?.code}: ${event.error?.message}`)
+    if (event.type === "speech.done") done = true
     if (event.audio) target.chunks.push(Buffer.from(event.audio, "base64"))
     for (const mark of event.speech_marks ?? [])
       while (target.starts.length < (units[mark.end] ?? text.length)) target.starts.push(mark.start_time / 1000)
     target.wake()
   })
+  if (!done) throw new Error("Speechify stream ended before speech.done")
 }
 
 /**
@@ -448,6 +558,7 @@ export async function post(url: string, init: RequestInit, retried = false): Pro
   try {
     return await once(url, init)
   } catch (error) {
+    init.signal?.throwIfAborted()
     if (dnsFailed(error)) return pinned(url, init)
     if (!retried && socketClosed(error)) return post(url, init, true)
     throw error
@@ -459,7 +570,10 @@ type FetchInit = RequestInit & { tls?: { serverName?: string } }
 async function once(url: string, init: FetchInit) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), HEADERS_MS)
-  return fetch(url, { ...init, signal: controller.signal })
+  return fetch(url, {
+    ...init,
+    signal: init.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
+  })
     .catch((error: unknown) => {
       if (controller.signal.aborted) throw new Error(`No response from ${new URL(url).host} in ${HEADERS_MS / 1000}s`)
       throw error
@@ -528,10 +642,10 @@ const DOH = ["1.1.1.1", "1.0.0.1"]
 async function doh(hostname: string) {
   for (const server of DOH) {
     try {
-      const response = await fetch(
-        `https://${server}/dns-query?name=${encodeURIComponent(hostname)}&type=A`,
-        { headers: { accept: "application/dns-json" }, signal: AbortSignal.timeout(3000) },
-      )
+      const response = await fetch(`https://${server}/dns-query?name=${encodeURIComponent(hostname)}&type=A`, {
+        headers: { accept: "application/dns-json" },
+        signal: AbortSignal.timeout(3000),
+      })
       if (!response.ok) continue
       const body = (await response.json()) as { Answer?: { type?: number; data?: string }[] }
       const address = body.Answer?.find((record) => record.type === 1 && ipv4(record.data))?.data
@@ -547,7 +661,12 @@ async function systemLookup(hostname: string) {
   if (!/^[a-zA-Z0-9.-]+$/.test(hostname)) return
   const commands = [
     ["dscacheutil", "-q", "host", "-a", "name", hostname],
-    ["python3", "-c", "import socket,sys; print(socket.getaddrinfo(sys.argv[1], 443, socket.AF_INET)[0][4][0])", hostname],
+    [
+      "python3",
+      "-c",
+      "import socket,sys; print(socket.getaddrinfo(sys.argv[1], 443, socket.AF_INET)[0][4][0])",
+      hostname,
+    ],
   ]
   for (const cmd of commands) {
     try {
@@ -596,15 +715,16 @@ async function idle<T>(read: Promise<T>, cancel: () => unknown) {
 
 type Target = ReturnType<typeof clip>
 
-function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean }) {
+function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean; duration?: number }) {
   const waiting: (() => void)[] = []
   const result = {
     ...input,
     error: undefined as Error | undefined,
     next: () => new Promise<void>((resolve) => waiting.push(resolve)),
     wake: () => waiting.splice(0).forEach((resolve) => resolve()),
-    ahead: (_time: number) => {},
+    ahead: (_time: number, _rate = 1) => {},
     need: (_char: number) => {},
+    cancel: async () => {},
     finish() {
       result.done = true
       result.wake()
@@ -639,7 +759,9 @@ async function firstKey() {
   }
 }
 
-function files(provider: Provider, text: string) {
-  const id = new Bun.CryptoHasher("sha256").update(`${provider.voice}\0${provider.model}\0${text}`).digest("hex")
-  return { audio: Bun.file(path.join(DIR, `${id}.mp3`)), meta: Bun.file(path.join(DIR, `${id}.json`)) }
+function files(provider: Provider, text: string, language: Language, directory: string) {
+  const id = new Bun.CryptoHasher("sha256")
+    .update(`language-v2\0${provider.name}\0${provider.voice}\0${provider.model}\0${language}\0${text}`)
+    .digest("hex")
+  return { audio: Bun.file(path.join(directory, `${id}.mp3`)), meta: Bun.file(path.join(directory, `${id}.json`)) }
 }

@@ -15,7 +15,7 @@ test("splits a long answer into growing pieces that end on sentences and cover i
 })
 
 test("keeps a short answer in one piece", () => {
-  expect(pieces("Done. Tests pass.")).toEqual([{ start: 0, end: 17 }])
+  expect(pieces("Done. Tests pass.")).toEqual([{ start: 0, end: 17, language: "en" }])
 })
 
 test("resolves around a stuck DNS client and keeps the original host", async () => {
@@ -33,7 +33,7 @@ test("resolves around a stuck DNS client and keeps the original host", async () 
       throw Object.assign(new Error("getaddrinfo ENOTFOUND nowhere.invalid"), { code: "ENOTFOUND" })
     }
     return original(input, init)
-  }) as typeof fetch
+  }) as unknown as typeof fetch
   try {
     const response = await post(`http://nowhere.invalid:${port}/v1`, { method: "POST", body: "{}" })
     expect(await response.text()).toBe("ok")
@@ -48,7 +48,7 @@ test("still reports ENOTFOUND when no resolver can find the host", async () => {
   const original = globalThis.fetch
   globalThis.fetch = (async () => {
     throw Object.assign(new Error("getaddrinfo ENOTFOUND missing.invalid"), { code: "ENOTFOUND" })
-  }) as typeof fetch
+  }) as unknown as typeof fetch
   try {
     await expect(post("https://missing.invalid/v1", { method: "POST" })).rejects.toThrow(/ENOTFOUND missing.invalid/)
   } finally {

@@ -33,6 +33,9 @@
     "agentview.ts",
     "player.ts",
     "language.ts",
+    "detector.js",
+    "detector.d.ts",
+    "detector.LICENSE",
     "media.ts",
     "nowplaying.swift",
     "script.ts",
@@ -44,6 +47,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "build:detector": "bun tools/build-detector.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
@@ -54,6 +58,7 @@
     "@opentui/keymap": "0.4.5",
     "@opentui/solid": "0.4.5",
     "@types/bun": "latest",
+    "eld": "2.1.1",
     "solid-js": "1.9.10",
     "typescript": "^7.0.2"
   },
@@ -77,8 +82,5 @@
     "@opentui/keymap": ">=0.4.5",
     "@opentui/solid": ">=0.4.5",
     "solid-js": ">=1.9.10"
-  },
-  "dependencies": {
-    "franc-min": "^6.2.0"
   }
 }

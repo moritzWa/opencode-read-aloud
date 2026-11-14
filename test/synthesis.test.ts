@@ -198,3 +198,21 @@ test("does not reuse a legacy whole-answer cache with the wrong language", async
     await local.close()
   }
 })
+
+test("the reported offer recommendation is sent to Speechify entirely in English", async () => {
+  const local = await fixture()
+  try {
+    const script = build([
+      "Everything is staged as a draft on the live Word offer, and nothing is submitted. Do I submit it? I recommend yes.",
+      'Microsoft sent Excel back with "Attention needed" too, so nothing on our side blocks the submit.',
+    ])
+    const clip = await load(script.text, script.blocks, local.source)
+    clip.need(script.text.length - 1)
+    await until(clip, () => clip.done)
+    expect(local.requests.length).toBeGreaterThan(0)
+    expect(local.requests.every((request) => request.language === "en-US" && request.voice_id === "dominic")).toBe(true)
+    expect(local.requests.map((request) => request.input).join("")).toBe(script.text)
+  } finally {
+    await local.close()
+  }
+})

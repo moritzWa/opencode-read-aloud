@@ -740,7 +740,12 @@ function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean; du
   return result
 }
 
-async function feed(source: Clip, sink: Bun.FileSink, stopped: () => boolean, fed: { bytes: number }) {
+export async function feed(
+  source: Clip,
+  sink: Pick<Bun.FileSink, "write" | "flush" | "end">,
+  stopped: () => boolean,
+  fed: { bytes: number },
+) {
   let sent = 0
   // Without the check a stopped playback would wait on a reading nobody hears.
   while (!stopped()) {
@@ -749,6 +754,10 @@ async function feed(source: Clip, sink: Bun.FileSink, stopped: () => boolean, fe
       sink.write(source.chunks[sent++])
     }
     await sink.flush()
+    // flush yields under pipe backpressure. A whole piece can arrive and wake
+    // before we subscribe below; waiting then starves playback until a new piece
+    // is requested, which cannot happen while the playback clock is stuck.
+    if (sent < source.chunks.length) continue
     if (source.done) {
       await sink.end()
       return

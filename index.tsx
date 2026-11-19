@@ -7,7 +7,7 @@ import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, inReading, isAnswerText, resumes } from "./answer"
 import { notifyReadAloud } from "./agentview"
 import { remote } from "./media"
-import { configure, load, log, play, type Clip, type Playback } from "./player"
+import { configure, load, log, play, prefetch, warm, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
 import { blocks, clear, markdowns, pick, reveal, show, transcript, type Block, type Spot } from "./view"
 
@@ -159,10 +159,7 @@ const tui = (async (api, options) => {
     await start(from)
   }
 
-  async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
-    stop()
-    const attempt = opening
-    const latest = currentAnswer(api)?.messageID
+  function scriptOf(answer: { messageID: string; partIDs: string[] }) {
     const segments = answer.partIDs.flatMap((partID) =>
       (blocks(viewOf(partID, answer.messageID)) ?? []).map((block, index) => ({
         ...block,
@@ -171,10 +168,31 @@ const tui = (async (api, options) => {
         index,
       })),
     )
-    const script = build(segments)
+    return { segments, script: build(segments) }
+  }
+
+  // Each answer's first piece is cached as soon as it is final, so ctrl+s finds it on disk.
+  let prefetched: string | undefined
+  async function prepare() {
+    const answer = currentAnswer(api)
+    if (!answer || answer.messageID === prefetched) return
+    const { script } = scriptOf(answer)
+    if (!script.text) return
+    prefetched = answer.messageID
+    await warm()
+    await prefetch(script.text, script.blocks)
+  }
+
+  async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
+    const began = performance.now()
+    stop()
+    const attempt = opening
+    const latest = currentAnswer(api)?.messageID
+    const { segments, script } = scriptOf(answer)
     if (!script.text) return api.ui.toast({ variant: "info", message: "Nothing to read in this answer" })
     setSessionID(answer.sessionID)
     setStatus("loading")
+    const prepared = performance.now()
     const clip = await load(script.text, script.blocks).catch(fail)
     if (attempt !== opening) {
       await clip?.cancel()
@@ -199,7 +217,14 @@ const tui = (async (api, options) => {
     const from = spot ? await timeAt(reading, spot, resolve) : 0
     if (current !== reading) return
     if (held) return hold(reading, from ?? 0)
+    const loaded = performance.now()
     await start(from ?? 0)
+    log("latency", {
+      prepare: Math.round(prepared - began),
+      load: Math.round(loaded - prepared),
+      play: Math.round(performance.now() - loaded),
+      total: Math.round(performance.now() - began),
+    })
   }
 
   async function start(from: number) {
@@ -358,7 +383,13 @@ const tui = (async (api, options) => {
       sweep()
     }, 120)
   }
-  const offs = [api.event.on("message.part.updated", schedule), api.event.on("message.updated", schedule)]
+  // The markdown has to be rendered before its script exists, so the answer settles first.
+  const settle = () => setTimeout(() => void prepare().catch((error) => log("prefetch-failed", { error: String(error) })), 500)
+  const offs = [
+    api.event.on("message.part.updated", schedule),
+    api.event.on("message.updated", schedule),
+    api.event.on("session.idle", settle),
+  ]
   const timer = setInterval(sweep, SWEEP_MS)
   schedule()
 

@@ -246,6 +246,25 @@ export async function load(
 }
 
 /**
+ * Caches the first piece of a script so pressing play on it finds the audio on disk.
+ * Only that piece is synthesized, which is a sentence or two.
+ */
+export async function prefetch(text: string, blocks?: readonly Range[], source?: Parameters<typeof load>[2]) {
+  const began = Date.now()
+  const clip = await load(text, blocks, source)
+  while (clip.duration === undefined && !clip.done) await clip.next()
+  await clip.cancel()
+  log("prefetch", { chars: text.length, ms: Date.now() - began, error: clip.error?.message })
+}
+
+/** Opens the speech connection and the audio engine ahead of the first play of a reading. */
+export async function warm() {
+  const found = await firstKey()
+  if (found?.provider.name === "speechify") fetch.preconnect("https://api.speechify.ai")
+  output()
+}
+
+/**
  * Synthesizes one piece onto the end of `result`, or reuses its cached audio, and
  * returns its length in seconds of 1x audio.
  */
@@ -349,11 +368,14 @@ function untagged(chunk: Uint8Array) {
  * the pitch-preserving tempo change, since opentui's audio has neither.
  */
 export async function play(source: Clip, from: number, rate: number): Promise<Playback> {
+  const began = Date.now()
   // A wedged engine gets one fresh replacement before the error reaches the user.
-  return attempt(source, from, rate).catch((error: unknown) => {
+  const playback = await attempt(source, from, rate).catch((error: unknown) => {
     if (!(error instanceof Wedged)) throw error
     return attempt(source, from, rate)
   })
+  log("play", { from: Number(from.toFixed(2)), rate, ms: Date.now() - began })
+  return playback
 }
 
 class Wedged extends Error {}
@@ -424,7 +446,6 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     if (errors) log("ffmpeg-stderr", { from: Number(from.toFixed(2)), stderr: errors.slice(-500) })
     throw new Wedged("The audio did not start playing")
   }
-  log("play", { from: Number(from.toFixed(2)), rate })
   const position = () => {
     const stats = stream.getStats()
     return from + (Number(stats.framesPlayed) / stats.sampleRate) * rate

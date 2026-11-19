@@ -260,7 +260,9 @@ export async function prefetch(text: string, blocks?: readonly Range[], source?:
 /** Opens the speech connection and the audio engine ahead of the first play of a reading. */
 export async function warm() {
   const found = await firstKey()
-  if (found?.provider.name === "speechify") fetch.preconnect("https://api.speechify.ai")
+  // Bun's fetch.preconnect throws "Invalid port" on https URLs, so a real request opens the connection.
+  if (found?.provider.name === "speechify")
+    void fetch("https://api.speechify.ai/", { method: "HEAD", signal: AbortSignal.timeout(5000) }).catch(() => {})
   output()
 }
 

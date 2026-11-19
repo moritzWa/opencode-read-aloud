@@ -3,7 +3,7 @@ import { createServer } from "node:http"
 import { mkdtemp, readdir, rm } from "node:fs/promises"
 import os from "node:os"
 import path from "node:path"
-import { load, mp3Duration, speechify, type Clip, type Provider } from "../player"
+import { load, mp3Duration, prefetch, speechify, type Clip, type Provider } from "../player"
 import { build } from "../script"
 
 async function until(clip: Clip, ready: () => boolean) {
@@ -94,6 +94,26 @@ test("streams explicit language/voice requests, offsets timestamps by decoded du
     await until(changed, () => changed.done)
     expect(local.requests).toHaveLength(4)
     expect(local.requests.at(-1)?.voice_id).toBe("benedikt-agent")
+  } finally {
+    await local.close()
+  }
+})
+
+test("caches only the first piece ahead of play, which then needs no request", async () => {
+  const local = await fixture()
+  try {
+    const script = build([
+      "This is the English introduction.",
+      "Another English sentence follows here, long enough to start a second piece after the first one fills up, so the answer has several pieces of speech to read aloud to the listener.",
+      "And a third sentence that should never be sent while only the first piece is cached ahead of play.",
+    ])
+    await prefetch(script.text, script.blocks, local.source)
+    expect(local.requests).toHaveLength(1)
+
+    const clip = await load(script.text, script.blocks, local.source)
+    await until(clip, () => clip.duration !== undefined)
+    expect(local.requests).toHaveLength(1)
+    await clip.cancel()
   } finally {
     await local.close()
   }

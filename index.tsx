@@ -173,14 +173,24 @@ const tui = (async (api, options) => {
   }
 
   // The first sentence is cached as soon as it is on screen, while the rest may still be streaming.
+  // The spoken script comes from the rendered markdown, which can appear after the part event, so this retries.
   let prefetched = ""
+  let seen = ""
+  let missed = ""
   async function prepare(settled: boolean) {
     const answer = currentAnswer(api)
     if (!answer) return
     const { script } = scriptOf(answer)
-    if (!script.text) return
+    if (!script.text) {
+      if (missed === answer.messageID) return
+      missed = answer.messageID
+      log("prefetch-skip", { reason: "no-view" })
+      return
+    }
     const first = pieces(script.text, script.blocks)[0]
-    if (!first || (!settled && first.end >= script.text.length)) return
+    const stable = settled || seen === script.text
+    seen = script.text
+    if (!first || (!stable && first.end >= script.text.length)) return
     const key = `${answer.messageID}\0${script.text.slice(first.start, first.end)}`
     if (key === prefetched) return
     prefetched = key
@@ -389,15 +399,21 @@ const tui = (async (api, options) => {
       void prepare(false).catch((error) => log("prefetch-failed", { error: String(error) }))
     }, 120)
   }
+  const retry = (settled: boolean) => void prepare(settled).catch((error) => log("prefetch-failed", { error: String(error) }))
   // Idle covers an answer whose only sentence never grew a second piece while streaming.
-  const settle = () => setTimeout(() => void prepare(true).catch((error) => log("prefetch-failed", { error: String(error) })), 200)
+  const settle = () => {
+    for (const delay of [200, 800, 2000]) setTimeout(() => retry(true), delay)
+  }
   const offs = [
     api.event.on("message.part.updated", schedule),
     api.event.on("message.updated", schedule),
     api.event.on("session.idle", settle),
   ]
   void warm().catch((error) => log("warm-failed", { error: String(error) }))
-  const timer = setInterval(sweep, SWEEP_MS)
+  const timer = setInterval(() => {
+    sweep()
+    retry(false)
+  }, SWEEP_MS)
   schedule()
 
   api.keymap.registerLayer({

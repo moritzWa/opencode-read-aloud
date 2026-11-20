@@ -255,6 +255,7 @@ export async function prefetch(text: string, blocks?: readonly Range[], source?:
   while (clip.duration === undefined && !clip.done) await clip.next()
   await clip.cancel()
   log("prefetch", { chars: text.length, ms: Date.now() - began, error: clip.error?.message })
+  return clip.error?.message
 }
 
 /** Opens the speech connection and the audio engine ahead of the first play of a reading. */

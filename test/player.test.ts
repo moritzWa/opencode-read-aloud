@@ -14,8 +14,13 @@ test("splits a long answer into growing pieces that end on sentences and cover i
   expect(ranges[1].end - ranges[1].start).toBeGreaterThan(ranges[0].end)
 })
 
-test("keeps a short answer in one piece", () => {
-  expect(pieces("Done. Tests pass.")).toEqual([{ start: 0, end: 17, language: "en" }])
+test("keeps the first sentence alone so it can be cached before the rest arrives", () => {
+  const text = "Done. Tests pass."
+  const ranges = pieces(text)
+  expect(text.slice(ranges[0].start, ranges[0].end)).toBe("Done. ")
+  expect(ranges.at(-1)?.end).toBe(text.length)
+  const full = "Done. Tests pass and then some more words arrive."
+  expect(pieces(full)[0]).toEqual(ranges[0])
 })
 
 test("resolves around a stuck DNS client and keeps the original host", async () => {

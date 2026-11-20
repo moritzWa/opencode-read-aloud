@@ -74,7 +74,8 @@ export function pieces(text: string, blocks: readonly Range[] = [{ start: 0, end
             ? space + 1
             : limit - (/[\uD800-\uDBFF]/.test(text[limit - 1]) ? 1 : 0)
       const previous = ranges.at(-1)
-      const size = Math.min(2000, 200 * 3 ** Math.max(0, ranges.length - 1))
+      // The first piece stays the first sentence, so it can be cached while the rest is still streaming.
+      const size = ranges.length === 1 ? 0 : Math.min(2000, 200 * 3 ** Math.max(0, ranges.length - 1))
       if (
         previous &&
         previous.language === selected &&

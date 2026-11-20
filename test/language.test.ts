@@ -18,9 +18,9 @@ test("reads the English introduction, German subject/email and English ending in
   const ranges = pieces(script.text, script.blocks)
   expect(ranges[0].language).toBe("en")
   expect(ranges.at(-1)?.language).toBe("en")
-  expect(ranges.slice(1, -1).every((range) => range.language === "de")).toBe(true)
+  expect(ranges.filter((range) => range.start >= script.blocks[1].start && range.end <= script.blocks.at(-2)!.end).every((range) => range.language === "de")).toBe(true)
   expect(ranges.map((range) => script.text.slice(range.start, range.end)).join("")).toBe(script.text)
-  expect(ranges[1].start).toBe(script.blocks[1].start)
+  expect(ranges.find((range) => range.start === script.blocks[1].start)?.language).toBe("de")
   expect(ranges.at(-1)?.start).toBe(script.blocks.at(-1)?.start)
 })
 
@@ -90,8 +90,8 @@ test("weak sentence guesses inherit the paragraph, while clear German still swit
   const text =
     "The request is ready and you can send it. Subject: Lando Health GmbH. Das ist eine deutsche Antwort und keine englische Zusammenfassung. Not sent."
   const ranges = pieces(text)
-  expect(ranges.map((range) => range.language)).toEqual(["en", "de", "en"])
-  expect(text.slice(ranges[0].start, ranges[0].end)).toContain("Subject: Lando Health GmbH")
+  expect(ranges.map((range) => range.language)).toEqual(["en", "en", "de", "en"])
+  expect(text.slice(ranges[1].start, ranges[1].end)).toContain("Subject: Lando Health GmbH")
 })
 
 test("recommendations stay English both alone and in the reported live-offer passage", () => {

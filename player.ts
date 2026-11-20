@@ -161,6 +161,8 @@ function createAudio() {
  * until `ahead` reports playback near it or `need` asks for a character in it.
  */
 export type Clip = {
+  /** Identity of the first piece, including provider, voice and language. */
+  leadKey?: string
   chunks: Uint8Array[]
   starts: number[]
   done: boolean
@@ -199,6 +201,11 @@ export async function load(
     languages: ranges.map((range) => range.language),
   })
   const result = clip({ chunks: [], starts: [], done: false })
+  if (ranges[0]) {
+    const range = ranges[0]
+    const settings = range.language === "de" && provider.german ? { ...provider, ...provider.german } : provider
+    result.leadKey = files(settings, text.slice(range.start, range.end), range.language, source?.directory ?? DIR).audio.name
+  }
   const controller = new AbortController()
   result.cancel = async () => {
     controller.abort()
@@ -250,13 +257,15 @@ export async function load(
 
 /**
  * Caches the first piece of a script so pressing play on it finds the audio on disk.
- * Only that piece is synthesized, which is a sentence or two.
+ * Only that piece is synthesized. Optional tempo conversion never opens an audio device.
  */
-export async function prefetch(text: string, blocks?: readonly Range[], source?: Parameters<typeof load>[2]) {
+export async function prefetch(text: string, blocks?: readonly Range[], source?: Parameters<typeof load>[2], rate?: number) {
   const began = Date.now()
+  const version = preparation
   const clip = await load(text, blocks, source)
   while (clip.duration === undefined && !clip.done) await clip.next()
   await clip.cancel()
+  if (!clip.error && rate !== undefined && clip.leadKey && version === preparation) prepareAudio(clip, rate)
   log("prefetch", { chars: text.length, ms: Date.now() - began, error: clip.error?.message })
   return clip.error?.message
 }
@@ -385,48 +394,97 @@ export async function play(source: Clip, from: number, rate: number): Promise<Pl
 
 class Wedged extends Error {}
 
+let prepared: ReturnType<typeof prepareAudio> | undefined
+let preparation = 0
+
+/** Releases the one speculative encoder on replacement, expiry or plugin unload. */
+export function clearPrepared() {
+  preparation++
+  const previous = prepared
+  prepared = undefined
+  if (!previous) return
+  clearTimeout(previous.timer)
+  previous.transport.stop()
+}
+
+/** Keeps only the first piece ready, with no audio device and no further synthesis. */
+export function prepareAudio(source: Clip, rate: number, ttl = 120_000) {
+  clearPrepared()
+  const staged = clip({ chunks: [...source.chunks], starts: [], done: false })
+  const size = staged.chunks.reduce((sum, chunk) => sum + chunk.length, 0)
+  const transport = transcode(staged, 0, rate)
+  const stop = transport.stop
+  const closed = Promise.withResolvers<void>()
+  transport.stop = () => {
+    staged.finish()
+    closed.resolve()
+    stop()
+  }
+  const value = {
+    key: source.leadKey,
+    rate,
+    transport,
+    timer: setTimeout(() => {
+      if (prepared === value) clearPrepared()
+    }, ttl),
+    attach(next: Clip) {
+      // Network and cache reads partition the same MP3 bytes differently. Skip by
+      // byte count, not chunk count, so the prefetched sentence is never repeated.
+      void (async () => {
+        let skip = size
+        let sent = 0
+        while (!staged.done) {
+          while (sent < next.chunks.length) {
+            const chunk = next.chunks[sent++]
+            const offset = Math.min(skip, chunk.length)
+            skip -= offset
+            if (offset < chunk.length) staged.chunks.push(chunk.subarray(offset))
+          }
+          staged.wake()
+          if (next.done) {
+            staged.finish()
+            return
+          }
+          await Promise.race([next.next(), closed.promise])
+        }
+      })().catch((error: unknown) => {
+        log("prerender-failed", { error: String(error) })
+        transport.stop()
+      })
+    },
+  }
+  value.timer.unref()
+  prepared = value
+  log("prerender", { bytes: size, rate })
+  return value
+}
+
+/** Seeks and speed/voice changes must keep using the normal decoding path. */
+export function takePrepared(source: Clip, from: number, rate: number) {
+  if (from !== 0 || !source.leadKey || prepared?.key !== source.leadKey || prepared.rate !== rate) return
+  if (prepared.transport.proc.exitCode !== null) {
+    clearPrepared()
+    return
+  }
+  const cached = prepared
+  prepared = undefined
+  clearTimeout(cached.timer)
+  cached.attach(source)
+  return cached.transport
+}
+
 async function attempt(source: Clip, from: number, rate: number): Promise<Playback> {
-  const ffmpeg = Bun.which("ffmpeg")
-  if (!ffmpeg) throw new Error("Reading aloud needs ffmpeg (brew install ffmpeg)")
   // A request that fails before any audio would otherwise reach the decoder as an
   // empty stream and surface as "Audio stream decoder failed" instead of its own error.
   while (!source.chunks.length && !source.done) await source.next()
   if (!source.chunks.length) throw source.error ?? new Error("The speech service returned no audio")
   source.ahead(from)
-  const seek = from > 0 ? ["-ss", from.toFixed(3)] : []
-  const proc = Bun.spawn(
-    [
-      ffmpeg,
-      "-hide_banner",
-      "-loglevel",
-      "error",
-      ...seek,
-      "-f",
-      "mp3",
-      "-i",
-      "pipe:0",
-      "-af",
-      // After a seek atempo can emit a first frame of a few samples, which the flac encoder
-      // refuses as a block size, so ffmpeg writes nothing; fixed-size frames avoid that.
-      `atempo=${rate},asetnsamples=n=4096:p=1`,
-      "-f",
-      "flac",
-      "pipe:1",
-    ],
-    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
-  )
-  children.add(proc)
-  const stderr = new Response(proc.stderr).text()
-  void proc.exited.then(async (code) => {
-    children.delete(proc)
-    // A kill is how every stop ends it; only ffmpeg's own failures are worth a line.
-    if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await stderr).slice(-500) })
-  })
-  const fed = { bytes: 0 }
-  void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
-  // The engine otherwise waits for a second of audio before it starts. The first flac
-  // frame is already enough to begin, and a later piece is requested before this one ends.
-  const opening = output()?.playStream(proc.stdout, {
+  const cached = takePrepared(source, from, rate)
+  const transport = cached ?? transcode(source, from, rate)
+  const { stderr, fed } = transport
+  log("render-start", { prepared: !!cached, from, rate })
+  // No engine is opened during pre-rendering. Only the encoded FLAC waits in memory.
+  const opening = output()?.playStream(transport.body, {
     format: "flac",
     buffer: { startupMs: 60, resumeMs: 80, capacityMs: 2000 },
   })
@@ -446,14 +504,13 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     })(),
   ]).catch((error: unknown) => log("stream-failed", { error: String(error) }))
   if (stream === "timeout") {
-    // fed shows whether ffmpeg had input, so the log tells a starved ffmpeg from a stuck engine.
     log("stream-timeout", {
       from: Number(from.toFixed(2)),
       fed: fed.bytes,
       chunks: source.chunks.length,
       done: source.done,
     })
-    proc.kill("SIGKILL")
+    transport.stop()
     void opening?.then(
       (late) => late.dispose(),
       () => {},
@@ -462,9 +519,8 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     throw new Wedged("The audio output did not start playing")
   }
   if (!stream) {
-    // The decoder fails when ffmpeg wrote nothing usable, so its stderr says why.
     const errors = await Promise.race([stderr, Bun.sleep(500).then(() => "")])
-    proc.kill("SIGKILL")
+    transport.stop()
     if (errors) log("ffmpeg-stderr", { from: Number(from.toFixed(2)), stderr: errors.slice(-500) })
     throw new Wedged("The audio did not start playing")
   }
@@ -472,8 +528,8 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
     const stats = stream.getStats()
     return from + (Number(stats.framesPlayed) / stats.sampleRate) * rate
   }
-  // Waiting on the next piece from the network leaves the buffer empty; audio sitting in
-  // the buffer while no frame plays is the output itself having stopped.
+  // An empty buffer means waiting on synthesis; buffered audio with no advancing
+  // playback clock means the output device itself is stuck.
   let played = -1n
   let since = Date.now()
   let stall: () => void = () => {}
@@ -492,7 +548,7 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
   }, 250)
   const stop = () => {
     clearInterval(timer)
-    proc.kill("SIGKILL")
+    transport.stop()
     try {
       stream.dispose()
     } catch {}
@@ -510,6 +566,65 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
       })
     }).finally(stop),
   }
+}
+
+/** Starts decoding and tempo conversion without opening an audio device. */
+export function transcode(source: Clip, from: number, rate: number) {
+  const ffmpeg = Bun.which("ffmpeg")
+  if (!ffmpeg) throw new Error("Reading aloud needs ffmpeg (brew install ffmpeg)")
+  const seek = from > 0 ? ["-ss", from.toFixed(3)] : []
+  const proc = Bun.spawn(
+    [
+      ffmpeg,
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-probesize",
+      "32",
+      "-analyzeduration",
+      "0",
+      ...seek,
+      "-f",
+      "mp3",
+      "-i",
+      "pipe:0",
+      "-af",
+      // After a seek atempo can emit a first frame of a few samples, which the flac encoder
+      // refuses as a block size, so ffmpeg writes nothing; fixed-size frames avoid that.
+      `atempo=${rate},asetnsamples=n=4096:p=1`,
+      "-flush_packets",
+      "1",
+      "-f",
+      "flac",
+      "pipe:1",
+    ],
+    { stdin: "pipe", stdout: "pipe", stderr: "pipe" },
+  )
+  children.add(proc)
+  const stderr = new Response(proc.stderr).text()
+  void proc.exited.then(async (code) => {
+    children.delete(proc)
+    // A kill is how every stop ends it; only ffmpeg's own failures are worth a line.
+    if (code !== 0 && !proc.killed) log("ffmpeg-failed", { code, stderr: (await stderr).slice(-500) })
+  })
+  const fed = { bytes: 0 }
+  void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
+  const reader = proc.stdout.getReader()
+  // Pull ahead before playback, but cap the queued FLAC at 256 KiB. A single paused
+  // encoder preserves filter/codec state across the first-piece boundary.
+  const body = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      const next = await reader.read()
+      if (next.done) return controller.close()
+      controller.enqueue(next.value)
+    },
+    cancel() { stop() },
+  }, new ByteLengthQueuingStrategy({ highWaterMark: 256 * 1024 }))
+  const stop = () => {
+    proc.kill("SIGKILL")
+    void reader.cancel().catch(() => {})
+  }
+  return { proc, stderr, fed, body, stop }
 }
 
 /** ElevenLabs streams one JSON object per line, with a start time for every character. */
@@ -769,6 +884,7 @@ function clip(input: { chunks: Uint8Array[]; starts: number[]; done: boolean; du
   const waiting: (() => void)[] = []
   const result = {
     ...input,
+    leadKey: undefined as string | undefined,
     error: undefined as Error | undefined,
     next: () => new Promise<void>((resolve) => waiting.push(resolve)),
     wake: () => waiting.splice(0).forEach((resolve) => resolve()),

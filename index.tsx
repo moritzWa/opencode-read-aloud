@@ -5,6 +5,7 @@ import { createBindingLookup } from "@opentui/keymap/extras"
 import { useTerminalDimensions } from "@opentui/solid"
 import { createSignal, Show } from "solid-js"
 import { answerParts, finalAnswer, inReading, isAnswerText, resumes } from "./answer"
+import { pieces } from "./language"
 import { notifyReadAloud } from "./agentview"
 import { remote } from "./media"
 import { configure, load, log, play, prefetch, warm, type Clip, type Playback } from "./player"
@@ -171,16 +172,20 @@ const tui = (async (api, options) => {
     return { segments, script: build(segments) }
   }
 
-  // Each answer's first piece is cached as soon as it is final, so ctrl+s finds it on disk.
-  let prefetched: string | undefined
-  async function prepare() {
+  // The first sentence is cached as soon as it is on screen, while the rest may still be streaming.
+  let prefetched = ""
+  async function prepare(settled: boolean) {
     const answer = currentAnswer(api)
-    if (!answer || answer.messageID === prefetched) return
+    if (!answer) return
     const { script } = scriptOf(answer)
     if (!script.text) return
-    prefetched = answer.messageID
+    const first = pieces(script.text, script.blocks)[0]
+    if (!first || (!settled && first.end >= script.text.length)) return
+    const key = `${answer.messageID}\0${script.text.slice(first.start, first.end)}`
+    if (key === prefetched) return
+    prefetched = key
     await warm()
-    await prefetch(script.text, script.blocks)
+    if (await prefetch(script.text, script.blocks)) prefetched = ""
   }
 
   async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
@@ -381,15 +386,17 @@ const tui = (async (api, options) => {
     pending = setTimeout(() => {
       pending = undefined
       sweep()
+      void prepare(false).catch((error) => log("prefetch-failed", { error: String(error) }))
     }, 120)
   }
-  // The markdown has to be rendered before its script exists, so the answer settles first.
-  const settle = () => setTimeout(() => void prepare().catch((error) => log("prefetch-failed", { error: String(error) })), 500)
+  // Idle covers an answer whose only sentence never grew a second piece while streaming.
+  const settle = () => setTimeout(() => void prepare(true).catch((error) => log("prefetch-failed", { error: String(error) })), 200)
   const offs = [
     api.event.on("message.part.updated", schedule),
     api.event.on("message.updated", schedule),
     api.event.on("session.idle", settle),
   ]
+  void warm().catch((error) => log("warm-failed", { error: String(error) }))
   const timer = setInterval(sweep, SWEEP_MS)
   schedule()
 

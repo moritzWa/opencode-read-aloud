@@ -28,6 +28,9 @@ const IDLE_MS = 30_000
 // playStream resolves once ffmpeg's first audio decodes, which takes well under a second;
 // longer means the engine has wedged, and the reading's lock would be held forever.
 const OPEN_MS = 5000
+// Once ffmpeg already has audio, a healthy engine starts well under a second. Waiting the
+// full OPEN_MS is what made a wedged engine feel like cmd+s did nothing.
+const OPEN_FED_MS = 800
 
 // Next to OpenCode's own log, since the plugin's only other channel is a toast.
 const LOG = path.join(DATA, "log", "read-aloud.log")
@@ -258,13 +261,12 @@ export async function prefetch(text: string, blocks?: readonly Range[], source?:
   return clip.error?.message
 }
 
-/** Opens the speech connection and the audio engine ahead of the first play of a reading. */
+/** Opens the speech connection ahead of the first play. The engine is left alone: one started early and left idle is what then fails to play. */
 export async function warm() {
   const found = await firstKey()
   // Bun's fetch.preconnect throws "Invalid port" on https URLs, so a real request opens the connection.
   if (found?.provider.name === "speechify")
     void fetch("https://api.speechify.ai/", { method: "HEAD", signal: AbortSignal.timeout(5000) }).catch(() => {})
-  output()
 }
 
 /**
@@ -423,9 +425,21 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
   const fed = { bytes: 0 }
   void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
   const opening = output()?.playStream(proc.stdout, { format: "flac" })
-  const stream = await Promise.race([opening, Bun.sleep(OPEN_MS).then(() => "timeout" as const)]).catch(
-    (error: unknown) => log("stream-failed", { error: String(error) }),
-  )
+  let opened = false
+  const stream = await Promise.race([
+    Promise.resolve(opening).then((value) => {
+      opened = true
+      return value
+    }),
+    (async () => {
+      const start = Date.now()
+      while (!opened && Date.now() - start < OPEN_MS) {
+        await Bun.sleep(100)
+        if (fed.bytes > 0 && Date.now() - start >= OPEN_FED_MS) return "timeout" as const
+      }
+      return "timeout" as const
+    })(),
+  ]).catch((error: unknown) => log("stream-failed", { error: String(error) }))
   if (stream === "timeout") {
     // fed shows whether ffmpeg had input, so the log tells a starved ffmpeg from a stuck engine.
     log("stream-timeout", {

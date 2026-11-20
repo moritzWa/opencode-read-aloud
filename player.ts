@@ -424,7 +424,12 @@ async function attempt(source: Clip, from: number, rate: number): Promise<Playba
   })
   const fed = { bytes: 0 }
   void feed(source, proc.stdin, () => proc.killed, fed).catch(() => {})
-  const opening = output()?.playStream(proc.stdout, { format: "flac" })
+  // The engine otherwise waits for a second of audio before it starts. The first flac
+  // frame is already enough to begin, and a later piece is requested before this one ends.
+  const opening = output()?.playStream(proc.stdout, {
+    format: "flac",
+    buffer: { startupMs: 60, resumeMs: 80, capacityMs: 2000 },
+  })
   let opened = false
   const stream = await Promise.race([
     Promise.resolve(opening).then((value) => {

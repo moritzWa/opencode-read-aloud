@@ -8,7 +8,7 @@ import { answerParts, finalAnswer, inReading, isAnswerText, resumes } from "./an
 import { pieces } from "./language"
 import { notifyReadAloud } from "./agentview"
 import { remote } from "./media"
-import { configure, load, log, play, prefetch, warm, type Clip, type Playback } from "./player"
+import { clearPrepared, configure, load, log, play, prefetch, warm, type Clip, type Playback } from "./player"
 import { build, source, wordAt, type Script } from "./script"
 import { blocks, clear, markdowns, pick, reveal, show, transcript, type Block, type Spot } from "./view"
 
@@ -177,7 +177,9 @@ const tui = (async (api, options) => {
   let prefetched = ""
   let seen = ""
   let missed = ""
+  let disposed = false
   async function prepare(settled: boolean) {
+    if (disposed) return
     const answer = currentAnswer(api)
     if (!answer) return
     const { script } = scriptOf(answer)
@@ -191,11 +193,12 @@ const tui = (async (api, options) => {
     const stable = settled || seen === script.text
     seen = script.text
     if (!first || (!stable && first.end >= script.text.length)) return
-    const key = `${answer.messageID}\0${script.text.slice(first.start, first.end)}`
+    const key = `${answer.messageID}\0${rate()}\0${script.text.slice(first.start, first.end)}`
     if (key === prefetched) return
     prefetched = key
     await warm()
-    if (await prefetch(script.text, script.blocks)) prefetched = ""
+    if (disposed) return
+    if (await prefetch(script.text, script.blocks, undefined, rate())) prefetched = ""
   }
 
   async function open(answer: { sessionID: string; messageID: string; partIDs: string[] }, spot?: Spot) {
@@ -510,11 +513,13 @@ const tui = (async (api, options) => {
   })
 
   api.lifecycle.onDispose(() => {
+    disposed = true
     clearInterval(timer)
     if (pending) clearTimeout(pending)
     for (const off of offs) if (typeof off === "function") off()
     stop()
     media.dispose()
+    clearPrepared()
   })
 }) satisfies TuiPlugin
 

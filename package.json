@@ -40,6 +40,7 @@
     "nowplaying.swift",
     "script.ts",
     "view.ts",
+    "native-view.ts",
     "v2.js",
     "v2-compat.js",
     "v2-compat.d.ts",

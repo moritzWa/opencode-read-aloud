@@ -11,6 +11,7 @@ import {
   type TextTableRenderable,
 } from "@opentui/core"
 import { tableText, type Piece, type TableText } from "./script"
+import { nativeBlocks, nativeClear, nativeMarkdown, nativeOffset, nativeShow } from "./native-view"
 
 export type Range = { start: number; end: number }
 export type Spot = { partID: string; messageID: string; node: Renderable; offset: number }
@@ -48,6 +49,7 @@ function children(node: Renderable | undefined): Renderable[] {
 // are safest to recognise from outside.
 function isMarkdown(node: unknown): node is MarkdownRenderable {
   const value = node as MarkdownRenderable | undefined
+  if (value && nativeMarkdown(value)) return true
   return Array.isArray(value?._blockStates) && typeof value?.content === "string"
 }
 
@@ -104,6 +106,7 @@ export type Block = Piece & { node: Renderable; table?: TableText }
  */
 export function blocks(view: MarkdownRenderable | undefined): Block[] | undefined {
   if (!view || view.isDestroyed) return
+  if (nativeMarkdown(view)) return nativeBlocks(view)
   return view._blockStates.flatMap((block): Block[] => {
     const token = block.token
     if (SKIP.has(token.type)) return []
@@ -131,6 +134,7 @@ export function blocks(view: MarkdownRenderable | undefined): Block[] | undefine
  */
 export function show(node: Renderable, sentence: Range, word: Range, colors: Colors, table?: TableText) {
   if (lit?.node !== node) clear()
+  if (nativeShow(node, sentence, word, colors)) return
   if (isTable(node)) {
     if (!table) return
     const original = lit?.node === node && lit.original ? lit.original : node.content
@@ -170,6 +174,7 @@ export function show(node: Renderable, sentence: Range, word: Range, colors: Col
 }
 
 export function clear() {
+  nativeClear()
   const current = lit
   lit = undefined
   if (!current || current.node.isDestroyed) return
@@ -292,7 +297,7 @@ export function pick(view: MarkdownRenderable, partID: string, messageID: string
   const node = block.node
   const offset = block.table && isTable(node)
     ? cellOffset(node, block.table, event.x, event.y)
-    : hasText(node) ? offsetAt(node, event.x, event.y) : undefined
+    : nativeOffset(node, event.x, event.y) ?? (hasText(node) ? offsetAt(node, event.x, event.y) : undefined)
   if (offset === undefined) return
   view.ctx.clearSelection()
   event.stopPropagation()

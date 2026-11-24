@@ -156,3 +156,14 @@ copied V1 `$XDG_STATE_HOME/opencode/kv.json` (or `~/.local/state/opencode/kv.jso
 Set `legacyKV` to an object or `legacyKVPath` to a seed file to migrate an
 isolated candidate explicitly. Existing V2 preferences win. The adapter writes
 only to V2 plugin storage; the seed file stays read-only.
+# Native Markdown compatibility
+
+OpenTUI 0.9's native Markdown renderer uses public block discovery and a frame-color
+overlay for speech highlighting. It does not replace Markdown text or inline
+hooks. Older OpenTUI versions keep their existing highlighting path.
+
+`validation/native-view.test.ts` exercises the native path against OpenTUI 0.9:
+prose, plain fences, tables, Unicode, streamed replacement, duplicate answers,
+double-click offsets, lavender colors, and unchanged character frames. These tests
+do not synthesize speech or play audio. Run them with the candidate OpenTUI
+dependencies; the regular test suite retains coverage for the older renderer.

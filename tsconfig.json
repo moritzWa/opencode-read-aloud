@@ -1,4 +1,5 @@
 {
+  "exclude": ["validation"],
   "compilerOptions": {
     "target": "ESNext",
     "module": "Preserve",
